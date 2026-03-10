@@ -21,6 +21,7 @@ import { engineQueries } from '../../../lib/database/queries';
 import { resetEnvironment, getClaudeUserConfigDir } from '../../../lib/engine/adapters/claude/environment';
 import { debug } from '$shared/utils/logger';
 import { getCleanSpawnEnv } from '../../../lib/shared/env';
+import { resolveClaudeCommand } from '../utils';
 
 // ── Helpers ──
 
@@ -190,9 +191,10 @@ export const accountsHandler = createRouter()
 		ptyEnv['CLAUDE_CONFIG_DIR'] = getClaudeUserConfigDir();
 		ptyEnv['BROWSER'] = 'false';
 
+		const claudeCmd = await resolveClaudeCommand();
 		let pty: ReturnType<typeof spawn>;
 		try {
-			pty = spawn('claude', ['setup-token'], {
+			pty = spawn(claudeCmd, ['setup-token'], {
 				name: 'xterm-256color',
 				cols: 1000,
 				rows: 30,

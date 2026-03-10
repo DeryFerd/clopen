@@ -243,13 +243,35 @@ export const interactPreviewHandler = createRouter()
 							await session.page.mouse.move(action.x!, action.y!, {
 								steps: action.steps || 1 // Reduced from 5 to 1 for faster response
 							});
-							// Update cursor position in browser context (fire-and-forget, don't await)
+							// Update cursor position and detect cursor type in browser context (fire-and-forget, don't await)
+							// This replaces the disabled cursor-tracking script (blocked by CloudFlare)
 							session.page.evaluate((data) => {
 								const { x, y } = data;
-								if ((window as any).__cursorInfo) {
-									(window as any).__cursorInfo.x = x;
-									(window as any).__cursorInfo.y = y;
-									(window as any).__cursorInfo.timestamp = Date.now();
+								// Detect cursor type from element under mouse
+								let cursor = 'default';
+								try {
+									const el = document.elementFromPoint(x, y);
+									if (el) {
+										cursor = window.getComputedStyle(el).cursor || 'default';
+									}
+								} catch {}
+
+								// Initialize or update __cursorInfo
+								const existing = (window as any).__cursorInfo;
+								if (existing) {
+									existing.cursor = cursor;
+									existing.x = x;
+									existing.y = y;
+									existing.timestamp = Date.now();
+									existing.hasRecentInteraction = true;
+								} else {
+									(window as any).__cursorInfo = {
+										cursor,
+										x,
+										y,
+										timestamp: Date.now(),
+										hasRecentInteraction: true
+									};
 								}
 							}, { x: action.x!, y: action.y! }).catch(() => { /* Ignore evaluation errors */ });
 						} catch (error) {

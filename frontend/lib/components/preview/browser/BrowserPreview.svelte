@@ -112,7 +112,7 @@
 			}
 		},
 		onMcpCursorHide: () => {
-			// Cursor stays visible between automated steps until user interacts manually
+			mcpVirtualCursor = { ...mcpVirtualCursor, visible: false };
 		},
 		transformBrowserToDisplayCoordinates: (browserX, browserY) => {
 			return transformBrowserToDisplayCoordinates(browserX, browserY);

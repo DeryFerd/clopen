@@ -68,6 +68,15 @@ export function createMcpHandler(config: McpHandlerConfig) {
 			handleTestCompleted(data);
 		});
 
+		// Hide cursor when the entire Claude request finishes or is stopped
+		ws.on('chat:complete', () => {
+			if (onCursorHide) onCursorHide();
+		});
+
+		ws.on('chat:cancelled', () => {
+			if (onCursorHide) onCursorHide();
+		});
+
 		// MCP Tab Management - Request/Response handlers
 		setupTabManagementListeners();
 
@@ -154,10 +163,9 @@ export function createMcpHandler(config: McpHandlerConfig) {
 		}
 	}
 
-	function handleTestCompleted(data: { sessionId: string; timestamp: number; source: 'mcp' }) {
-		if (mcpControlState.browserSessionId === data.sessionId && onCursorHide) {
-			onCursorHide();
-		}
+	function handleTestCompleted(_data: { sessionId: string; timestamp: number; source: 'mcp' }) {
+		// Cursor is hidden via chat:complete / chat:cancelled listeners instead,
+		// because test-completed fires per-tool-call, not at end of full request.
 	}
 
 	function handleTabsListRequest(data: { requestId: string }) {

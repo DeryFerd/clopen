@@ -15,8 +15,15 @@ export interface AppSettings {
 	fontSize: number;
 }
 
+/** Authentication mode */
+export type AuthMode = 'none' | 'required';
+
 /** System-wide settings (admin-only, shared across all users) */
 export interface SystemSettings {
+	/** Authentication mode: 'none' = single user no login, 'required' = multi-user with login. Default: 'required'. */
+	authMode: AuthMode;
+	/** Whether the initial setup wizard has been completed. Default: false. */
+	onboardingComplete: boolean;
 	/** Restrict folder browser to only these base paths. Empty = no restriction. */
 	allowedBasePaths: string[];
 	/** Automatically update to the latest version when available. Default: false. */

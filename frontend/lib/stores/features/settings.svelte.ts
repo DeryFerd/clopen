@@ -37,6 +37,8 @@ const defaultSettings: AppSettings = {
 
 // Default system settings
 const defaultSystemSettings: SystemSettings = {
+	authMode: 'required',
+	onboardingComplete: false,
 	allowedBasePaths: [],
 	autoUpdate: false,
 	sessionLifetimeDays: 30

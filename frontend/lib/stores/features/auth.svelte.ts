@@ -4,10 +4,12 @@
  * Manages authentication state: setup, login, invite, and session persistence.
  * Session token is stored in localStorage for cross-refresh persistence.
  * The token is validated against the server on each app load.
+ * Supports no-auth mode (single user, no login required).
  */
 
 import ws from '$frontend/lib/utils/ws';
 import { debug } from '$shared/utils/logger';
+import type { AuthMode } from '$shared/types/stores/settings';
 
 const SESSION_TOKEN_KEY = 'clopen-session-token';
 
@@ -27,6 +29,7 @@ let authState = $state<AuthState>('loading');
 let currentUser = $state<AuthUser | null>(null);
 let sessionToken = $state<string | null>(null);
 let personalAccessToken = $state<string | null>(null);
+let authMode = $state<AuthMode>('required');
 
 export const authStore = {
 	get authState() { return authState; },
@@ -34,9 +37,12 @@ export const authStore = {
 	get sessionToken() { return sessionToken; },
 	/** PAT is only available right after setup/invite accept — shown once */
 	get personalAccessToken() { return personalAccessToken; },
+	/** Current auth mode from server */
+	get authMode() { return authMode; },
 
 	get isAdmin() { return currentUser?.role === 'admin'; },
 	get isAuthenticated() { return authState === 'ready' && currentUser !== null; },
+	get isNoAuth() { return authMode === 'none'; },
 
 	/**
 	 * Initialize auth — called on app mount.
@@ -62,8 +68,20 @@ export const authStore = {
 					localStorage.setItem(SESSION_TOKEN_KEY, result.sessionToken);
 					// Set token on WS client for reconnection auth
 					ws.setSessionToken(result.sessionToken);
+
+					// Fetch auth mode and onboarding status from server
+					const status = await ws.http('auth:status', {});
+					authMode = status.authMode;
+
+					// If onboarding not yet completed, show wizard instead of going to ready
+					if (!status.onboardingComplete) {
+						authState = 'setup';
+						debug.log('auth', `Authenticated but onboarding pending: ${result.user.name}`);
+						return;
+					}
+
 					authState = 'ready';
-					debug.log('auth', `Authenticated: ${result.user.name} (${result.user.role})`);
+					debug.log('auth', `Authenticated: ${result.user.name} (${result.user.role}), authMode: ${authMode}`);
 					return;
 				} catch {
 					// Token invalid or expired — clear and continue
@@ -82,17 +100,32 @@ export const authStore = {
 
 			// Check server status
 			const status = await ws.http('auth:status', {});
+			authMode = status.authMode;
 
-			if (status.needsSetup) {
-				authState = 'setup';
+			if (!status.onboardingComplete) {
+				if (status.needsSetup) {
+					// Fresh install — show wizard
+					authState = 'setup';
+				} else if (authMode === 'none') {
+					// No-auth mode, existing data — auto-login then show wizard
+					await this.autoLoginNoAuth();
+					authState = 'setup';
+				} else {
+					// With-auth mode, existing users, no session — need to login first
+					// After login, the login() method will redirect to setup wizard
+					authState = 'login';
+				}
+			} else if (authMode === 'none') {
+				// Onboarding done, no-auth mode: auto-login
+				await this.autoLoginNoAuth();
 			} else {
 				authState = 'login';
 			}
 		} catch (error) {
 			debug.error('auth', 'Auth initialization failed:', error);
-			// Fallback: try to check status
 			try {
 				const status = await ws.http('auth:status', {});
+				authMode = status.authMode;
 				authState = status.needsSetup ? 'setup' : 'login';
 			} catch {
 				authState = 'login';
@@ -101,7 +134,20 @@ export const authStore = {
 	},
 
 	/**
-	 * Setup — create first admin account.
+	 * Auto-login for no-auth mode (returning visitors).
+	 */
+	async autoLoginNoAuth() {
+		const result = await ws.http('auth:auto-login-no-auth', {});
+		currentUser = result.user;
+		sessionToken = result.sessionToken;
+		localStorage.setItem(SESSION_TOKEN_KEY, result.sessionToken);
+		ws.setSessionToken(result.sessionToken);
+		authState = 'ready';
+		debug.log('auth', `No-auth auto-login: ${result.user.name}`);
+	},
+
+	/**
+	 * Setup — create first admin account (with-auth mode).
 	 */
 	async setup(name: string) {
 		const result = await ws.http('auth:setup', { name });
@@ -110,15 +156,42 @@ export const authStore = {
 		personalAccessToken = result.personalAccessToken;
 		localStorage.setItem(SESSION_TOKEN_KEY, result.sessionToken);
 		ws.setSessionToken(result.sessionToken);
+		authMode = 'required';
 		// Don't set authState to 'ready' yet — setup page shows PAT first
 		debug.log('auth', `Admin setup complete: ${result.user.name}`);
 	},
 
 	/**
-	 * Complete setup — transition to ready state after user has copied PAT.
+	 * Setup no-auth mode — create default admin, no PAT needed.
 	 */
-	completeSetup() {
+	async setupNoAuth() {
+		const result = await ws.http('auth:setup-no-auth', {});
+		currentUser = result.user;
+		sessionToken = result.sessionToken;
+		localStorage.setItem(SESSION_TOKEN_KEY, result.sessionToken);
+		ws.setSessionToken(result.sessionToken);
+		authMode = 'none';
+		// Don't set authState to 'ready' yet — wizard continues to next step
+		debug.log('auth', `No-auth setup complete: ${result.user.name}`);
+	},
+
+	/**
+	 * Complete setup — transition to ready state after wizard is done.
+	 * Saves onboardingComplete flag so wizard won't show again.
+	 */
+	async completeSetup() {
 		personalAccessToken = null;
+
+		// Save onboardingComplete to system settings
+		try {
+			const { loadSystemSettings, updateSystemSettings } = await import('$frontend/lib/stores/features/settings.svelte');
+			await loadSystemSettings();
+			await updateSystemSettings({ onboardingComplete: true });
+		} catch {
+			// Best-effort — if this fails, wizard may show again
+			debug.warn('auth', 'Failed to save onboardingComplete flag');
+		}
+
 		authState = 'ready';
 	},
 
@@ -131,6 +204,16 @@ export const authStore = {
 		sessionToken = result.sessionToken;
 		localStorage.setItem(SESSION_TOKEN_KEY, result.sessionToken);
 		ws.setSessionToken(result.sessionToken);
+
+		// Check if onboarding is pending
+		const status = await ws.http('auth:status', {});
+		authMode = status.authMode;
+		if (!status.onboardingComplete) {
+			authState = 'setup';
+			debug.log('auth', `Logged in, onboarding pending: ${result.user.name}`);
+			return;
+		}
+
 		authState = 'ready';
 		debug.log('auth', `Logged in: ${result.user.name} (${result.user.role})`);
 	},

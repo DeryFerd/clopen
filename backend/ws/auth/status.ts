@@ -1,6 +1,6 @@
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { needsSetup, getUserById } from '$backend/lib/auth/auth-service';
+import { needsSetup, getUserById, getAuthMode, isOnboardingComplete } from '$backend/lib/auth/auth-service';
 import { ws } from '$backend/lib/utils/ws';
 
 export const statusHandler = createRouter()
@@ -8,7 +8,9 @@ export const statusHandler = createRouter()
 		data: t.Object({}),
 		response: t.Object({
 			needsSetup: t.Boolean(),
+			onboardingComplete: t.Boolean(),
 			authenticated: t.Boolean(),
+			authMode: t.Union([t.Literal('none'), t.Literal('required')]),
 			user: t.Optional(t.Object({
 				id: t.String(),
 				name: t.String(),
@@ -20,6 +22,8 @@ export const statusHandler = createRouter()
 		})
 	}, async ({ conn }) => {
 		const setup = needsSetup();
+		const onboardingDone = isOnboardingComplete();
+		const authMode = getAuthMode();
 		const authenticated = ws.isAuthenticated(conn);
 
 		let user = undefined;
@@ -33,5 +37,5 @@ export const statusHandler = createRouter()
 			}
 		}
 
-		return { needsSetup: setup, authenticated, user };
+		return { needsSetup: setup, onboardingComplete: onboardingDone, authenticated, authMode, user };
 	});

@@ -4,7 +4,7 @@
  * Core authentication logic: user creation, session management, invite handling.
  */
 
-import { authQueries } from '$backend/lib/database/queries';
+import { authQueries, settingsQueries } from '$backend/lib/database/queries';
 import { generateSessionToken, generatePAT, generateInviteToken, hashToken, getTokenType } from './tokens';
 import { generateColorFromString, getInitials } from '$backend/lib/user/helpers';
 import { debug } from '$shared/utils/logger';
@@ -66,6 +66,86 @@ function createSessionForUser(userId: string, sessionDays?: number): { sessionTo
  */
 export function needsSetup(): boolean {
 	return authQueries.countUsers() === 0;
+}
+
+/**
+ * Get parsed system settings from DB (cached per call).
+ */
+function getSystemSettingsParsed(): Record<string, unknown> {
+	try {
+		const setting = settingsQueries.get('system:settings');
+		if (setting?.value) {
+			return typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+		}
+	} catch {
+		// Settings may not exist yet
+	}
+	return {};
+}
+
+/**
+ * Get the current auth mode from system settings.
+ * Returns 'required' by default (before setup is complete).
+ */
+export function getAuthMode(): 'none' | 'required' {
+	const parsed = getSystemSettingsParsed();
+	if (parsed.authMode === 'none' || parsed.authMode === 'required') {
+		return parsed.authMode as 'none' | 'required';
+	}
+	return 'required';
+}
+
+/**
+ * Check if the initial onboarding wizard has been completed.
+ */
+export function isOnboardingComplete(): boolean {
+	const parsed = getSystemSettingsParsed();
+	return parsed.onboardingComplete === true;
+}
+
+/**
+ * Create a default admin user for no-auth mode.
+ * Does not generate a PAT (not needed for no-auth).
+ * If users already exist, returns the first admin.
+ */
+export function createOrGetNoAuthAdmin(): AuthResult {
+	// If users already exist, return the first admin
+	const existingUsers = authQueries.getAllUsers();
+	const existingAdmin = existingUsers.find(u => u.role === 'admin');
+	if (existingAdmin) {
+		const { sessionToken, expiresAt } = createSessionForUser(existingAdmin.id);
+		debug.log('auth', `No-auth mode: reusing existing admin: ${existingAdmin.name} (${existingAdmin.id})`);
+		return {
+			user: toAuthUser(existingAdmin),
+			sessionToken,
+			expiresAt
+		};
+	}
+
+	// Create default admin
+	const userId = `user-${crypto.randomUUID()}`;
+	const now = new Date().toISOString();
+	const defaultName = 'Admin';
+
+	const dbUser = authQueries.createUser({
+		id: userId,
+		name: defaultName,
+		color: generateColorFromString(defaultName),
+		avatar: getInitials(defaultName),
+		role: 'admin',
+		personal_access_token_hash: '', // No PAT for no-auth mode
+		created_at: now
+	});
+
+	const { sessionToken, expiresAt } = createSessionForUser(userId);
+
+	debug.log('auth', `No-auth mode: created default admin: ${defaultName} (${userId})`);
+
+	return {
+		user: toAuthUser(dbUser),
+		sessionToken,
+		expiresAt
+	};
 }
 
 /**

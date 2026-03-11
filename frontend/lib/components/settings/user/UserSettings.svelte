@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { authStore } from '$frontend/lib/stores/features/auth.svelte';
+	import { systemSettings } from '$frontend/lib/stores/features/settings.svelte';
 	import { addNotification } from '$frontend/lib/stores/ui/notification.svelte';
 	import Icon from '../../common/Icon.svelte';
 	import Dialog from '../../common/Dialog.svelte';
 	import { debug } from '$shared/utils/logger';
+
+	const isNoAuth = $derived(systemSettings.authMode === 'none');
 
 	// State
 	let userNameInput = $state('');
@@ -173,53 +176,55 @@
 				{/if}
 			</div>
 
-			<!-- Personal Access Token -->
-			<div class="p-4 bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 rounded-xl">
-				<div class="flex items-center gap-2 text-sm font-semibold text-slate-500 mb-3">
-					<Icon name="lucide:key-round" class="w-4 h-4 opacity-70" />
-					<span>Personal Access Token</span>
-				</div>
-				<p class="text-xs text-slate-600 dark:text-slate-500 mb-3">
-					Use this token to log in from other devices. Keep it secret.
-				</p>
-
-				{#if showPAT && currentPAT}
-					<div class="flex flex-col gap-2 mb-3">
-						<div class="flex items-center gap-2">
-							<code class="flex-1 py-2.5 px-3.5 bg-slate-50 dark:bg-slate-900/80 border border-emerald-500/30 rounded-lg font-mono text-xs text-slate-700 dark:text-slate-300 break-all">
-								{currentPAT}
-							</code>
-							<button
-								type="button"
-								onclick={copyPAT}
-								class="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-all"
-								title="Copy token"
-							>
-								<Icon name="lucide:copy" class="w-4 h-4" />
-							</button>
-						</div>
-						<div class="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-							<Icon name="lucide:triangle-alert" class="w-3.5 h-3.5" />
-							<span>This token is shown only once. Copy and store it securely.</span>
-						</div>
+			{#if !isNoAuth}
+				<!-- Personal Access Token -->
+				<div class="p-4 bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 rounded-xl">
+					<div class="flex items-center gap-2 text-sm font-semibold text-slate-500 mb-3">
+						<Icon name="lucide:key-round" class="w-4 h-4 opacity-70" />
+						<span>Personal Access Token</span>
 					</div>
-				{/if}
+					<p class="text-xs text-slate-600 dark:text-slate-500 mb-3">
+						Use this token to log in from other devices. Keep it secret.
+					</p>
 
-				<button
-					type="button"
-					onclick={() => { showRegenerateConfirm = true; }}
-					disabled={isRegeneratingPAT}
-					class="inline-flex items-center gap-1.5 py-2 px-3.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-600 dark:text-amber-400 text-xs font-semibold cursor-pointer transition-all duration-150 hover:bg-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-				>
-					{#if isRegeneratingPAT}
-						<div class="w-3.5 h-3.5 border-2 border-amber-600/30 border-t-amber-600 rounded-full animate-spin"></div>
-						Regenerating...
-					{:else}
-						<Icon name="lucide:refresh-cw" class="w-3.5 h-3.5" />
-						Regenerate Token
+					{#if showPAT && currentPAT}
+						<div class="flex flex-col gap-2 mb-3">
+							<div class="flex items-center gap-2">
+								<code class="flex-1 py-2.5 px-3.5 bg-slate-50 dark:bg-slate-900/80 border border-emerald-500/30 rounded-lg font-mono text-xs text-slate-700 dark:text-slate-300 break-all">
+									{currentPAT}
+								</code>
+								<button
+									type="button"
+									onclick={copyPAT}
+									class="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-all"
+									title="Copy token"
+								>
+									<Icon name="lucide:copy" class="w-4 h-4" />
+								</button>
+							</div>
+							<div class="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+								<Icon name="lucide:triangle-alert" class="w-3.5 h-3.5" />
+								<span>This token is shown only once. Copy and store it securely.</span>
+							</div>
+						</div>
 					{/if}
-				</button>
-			</div>
+
+					<button
+						type="button"
+						onclick={() => { showRegenerateConfirm = true; }}
+						disabled={isRegeneratingPAT}
+						class="inline-flex items-center gap-1.5 py-2 px-3.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-600 dark:text-amber-400 text-xs font-semibold cursor-pointer transition-all duration-150 hover:bg-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						{#if isRegeneratingPAT}
+							<div class="w-3.5 h-3.5 border-2 border-amber-600/30 border-t-amber-600 rounded-full animate-spin"></div>
+							Regenerating...
+						{:else}
+							<Icon name="lucide:refresh-cw" class="w-3.5 h-3.5" />
+							Regenerate Token
+						{/if}
+					</button>
+				</div>
+			{/if}
 
 			<!-- User ID -->
 			<div class="p-4 bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 rounded-xl">
@@ -234,17 +239,19 @@
 				</div>
 			</div>
 
-			<!-- Logout -->
-			<div class="pt-2">
-				<button
-					type="button"
-					onclick={handleLogout}
-					class="inline-flex items-center gap-1.5 py-2.5 px-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600 dark:text-red-400 text-sm font-semibold cursor-pointer transition-all duration-150 hover:bg-red-500/20 hover:border-red-600/40"
-				>
-					<Icon name="lucide:log-out" class="w-4 h-4" />
-					Sign Out
-				</button>
-			</div>
+			{#if !isNoAuth}
+				<!-- Logout -->
+				<div class="pt-2">
+					<button
+						type="button"
+						onclick={handleLogout}
+						class="inline-flex items-center gap-1.5 py-2.5 px-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600 dark:text-red-400 text-sm font-semibold cursor-pointer transition-all duration-150 hover:bg-red-500/20 hover:border-red-600/40"
+					>
+						<Icon name="lucide:log-out" class="w-4 h-4" />
+						Sign Out
+					</button>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>

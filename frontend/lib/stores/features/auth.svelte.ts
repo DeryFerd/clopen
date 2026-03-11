@@ -260,6 +260,24 @@ export const authStore = {
 	},
 
 	/**
+	 * Logout all sessions (admin action — used when switching auth mode).
+	 */
+	async logoutAll() {
+		try {
+			await ws.http('auth:logout-all', {});
+		} catch {
+			// Ignore errors
+		}
+		currentUser = null;
+		sessionToken = null;
+		personalAccessToken = null;
+		localStorage.removeItem(SESSION_TOKEN_KEY);
+		ws.setSessionToken(null);
+		authState = 'login';
+		debug.log('auth', 'All sessions logged out');
+	},
+
+	/**
 	 * Update display name.
 	 */
 	async updateName(newName: string) {

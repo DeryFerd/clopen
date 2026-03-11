@@ -10,6 +10,7 @@
 		type SettingsSection
 	} from '$frontend/lib/stores/ui/settings-modal.svelte';
 	import { authStore } from '$frontend/lib/stores/features/auth.svelte';
+	import { systemSettings } from '$frontend/lib/stores/features/settings.svelte';
 
 	// Import settings components
 	import ModelSettings from './model/ModelSettings.svelte';
@@ -30,10 +31,15 @@
 	const isOpen = $derived(settingsModalState.isOpen);
 	const activeSection = $derived(settingsModalState.activeSection);
 	const isAdmin = $derived(authStore.isAdmin);
+	const isNoAuth = $derived(systemSettings.authMode === 'none');
 
-	// Filter sections: hide admin-only tabs for non-admins
+	// Filter sections: hide admin-only tabs for non-admins, hide team in no-auth mode
 	const visibleSections = $derived(
-		settingsSections.filter(s => !s.adminOnly || isAdmin)
+		settingsSections.filter(s => {
+			if (s.adminOnly && !isAdmin) return false;
+			if (s.id === 'team' && isNoAuth) return false;
+			return true;
+		})
 	);
 
 	// Handle section change
@@ -57,6 +63,14 @@
 			closeSettingsModal();
 		}
 	}
+
+	// Auto-redirect when current section becomes hidden
+	$effect(() => {
+		const isVisible = visibleSections.some(s => s.id === activeSection);
+		if (!isVisible && visibleSections.length > 0) {
+			setActiveSection(visibleSections[0].id);
+		}
+	});
 
 	// Get current section info
 	const currentSectionInfo = $derived(
@@ -225,7 +239,7 @@
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<AIEnginesSettings />
 							</div>
-						{:else if activeSection === 'team' && isAdmin}
+						{:else if activeSection === 'team' && isAdmin && !isNoAuth}
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<TeamSettings />
 								<div class="mt-6">

@@ -464,6 +464,15 @@ export function updateUserName(userId: string, newName: string): AuthUser {
 }
 
 /**
+ * Logout all sessions (all users)
+ */
+export function logoutAllSessions(): number {
+	const count = authQueries.deleteAllSessions();
+	debug.log('auth', `All sessions deleted: ${count}`);
+	return count;
+}
+
+/**
  * Cleanup expired sessions
  */
 export function cleanupExpiredSessions(): number {

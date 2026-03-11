@@ -20,8 +20,21 @@
 	let loading = $state(true);
 	let isCreating = $state(false);
 
-	// Store generated URLs by invite ID (raw token only available at creation time)
-	const inviteURLs = new Map<string, string>();
+	// Store generated URLs by invite ID — persisted in sessionStorage so
+	// they survive page refresh (raw token only available at creation time)
+	const STORAGE_KEY = 'clopen-invite-urls';
+	let inviteURLs = $state<Record<string, string>>({});
+
+	function loadStoredURLs() {
+		try {
+			const stored = sessionStorage.getItem(STORAGE_KEY);
+			if (stored) inviteURLs = JSON.parse(stored);
+		} catch { /* ignore */ }
+	}
+
+	function saveURLsToStorage() {
+		sessionStorage.setItem(STORAGE_KEY, JSON.stringify(inviteURLs));
+	}
 
 	// Per-invite copy feedback
 	let copiedId = $state<string | null>(null);
@@ -90,7 +103,8 @@
 
 			const baseURL = window.location.origin;
 			const url = `${baseURL}/#invite/${result.inviteToken}`;
-			inviteURLs.set(result.invite.id, url);
+			inviteURLs = { ...inviteURLs, [result.invite.id]: url };
+			saveURLsToStorage();
 
 			addNotification({ type: 'success', title: 'Created', message: 'Invite link created' });
 			await loadInvites();
@@ -103,7 +117,7 @@
 	}
 
 	function copyInviteURL(inviteId: string) {
-		const url = inviteURLs.get(inviteId);
+		const url = inviteURLs[inviteId];
 		if (!url) return;
 		navigator.clipboard.writeText(url);
 		copiedId = inviteId;
@@ -121,7 +135,9 @@
 		const revokedId = inviteToRevoke.id;
 		try {
 			await ws.http('auth:revoke-invite', { id: revokedId });
-			inviteURLs.delete(revokedId);
+			const { [revokedId]: _, ...rest } = inviteURLs;
+			inviteURLs = rest;
+			saveURLsToStorage();
 			invites = invites.filter(inv => inv.id !== revokedId);
 			addNotification({ type: 'success', title: 'Revoked', message: 'Invite link has been revoked' });
 		} catch (error) {
@@ -133,9 +149,10 @@
 		}
 	}
 
-	// Load on mount + start ticker
+	// Load on mount + start ticker + restore URLs from storage
 	$effect(() => {
 		if (authStore.isAdmin) {
+			loadStoredURLs();
 			loadInvites();
 			startTicker();
 			return () => stopTicker();
@@ -156,7 +173,7 @@
 	{:else}
 		<div class="flex flex-col gap-2">
 			{#each activeInvites as invite (invite.id)}
-				{@const url = inviteURLs.get(invite.id)}
+				{@const url = inviteURLs[invite.id]}
 				<div class="flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg">
 					<div class="flex-1 min-w-0 font-mono text-xs text-slate-600 dark:text-slate-400 truncate select-all">
 						{url ?? '—'}

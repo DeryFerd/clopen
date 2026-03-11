@@ -5,6 +5,7 @@ import {
 	loginWithToken,
 	createUserFromInvite,
 	logout,
+	logoutAllSessions,
 	validateInviteToken,
 	regeneratePAT,
 	updateUserName,
@@ -243,6 +244,17 @@ export const loginHandler = createRouter()
 		const userId = ws.getUserId(conn);
 		const pat = regeneratePAT(userId);
 		return { personalAccessToken: pat };
+	})
+
+	// Logout all sessions (admin only — used when switching auth mode)
+	.http('auth:logout-all', {
+		data: t.Object({}),
+		response: t.Object({
+			count: t.Number()
+		})
+	}, async () => {
+		const count = logoutAllSessions();
+		return { count };
 	})
 
 	// Update display name (authenticated user)

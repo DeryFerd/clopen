@@ -191,5 +191,11 @@ export const authQueries = {
 	revokeInvite(id: string): void {
 		const db = getDatabase();
 		db.prepare('DELETE FROM invite_tokens WHERE id = ?').run(id);
+	},
+
+	deleteAllSessions(): number {
+		const db = getDatabase();
+		const result = db.prepare('DELETE FROM auth_sessions').run() as { changes: number };
+		return result.changes;
 	}
 };

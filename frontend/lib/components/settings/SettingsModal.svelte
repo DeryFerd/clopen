@@ -10,6 +10,7 @@
 		type SettingsSection
 	} from '$frontend/lib/stores/ui/settings-modal.svelte';
 	import { authStore } from '$frontend/lib/stores/features/auth.svelte';
+	import { systemSettings } from '$frontend/lib/stores/features/settings.svelte';
 
 	// Import settings components
 	import ModelSettings from './model/ModelSettings.svelte';
@@ -30,10 +31,15 @@
 	const isOpen = $derived(settingsModalState.isOpen);
 	const activeSection = $derived(settingsModalState.activeSection);
 	const isAdmin = $derived(authStore.isAdmin);
+	const isNoAuth = $derived(systemSettings.authMode === 'none');
 
-	// Filter sections: hide admin-only tabs for non-admins
+	// Filter sections: hide admin-only tabs for non-admins, hide team in no-auth mode
 	const visibleSections = $derived(
-		settingsSections.filter(s => !s.adminOnly || isAdmin)
+		settingsSections.filter(s => {
+			if (s.adminOnly && !isAdmin) return false;
+			if (s.id === 'team' && isNoAuth) return false;
+			return true;
+		})
 	);
 
 	// Handle section change

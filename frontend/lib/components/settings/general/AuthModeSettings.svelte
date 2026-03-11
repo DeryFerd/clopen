@@ -1,40 +1,69 @@
 <script lang="ts">
 	import { systemSettings, updateSystemSettings } from '$frontend/lib/stores/features/settings.svelte';
 	import { authStore } from '$frontend/lib/stores/features/auth.svelte';
+	import { addNotification } from '$frontend/lib/stores/ui/notification.svelte';
 	import Icon from '../../common/Icon.svelte';
 	import Dialog from '../../common/Dialog.svelte';
 	import type { AuthMode } from '$shared/types/stores/settings';
+	import { debug } from '$shared/utils/logger';
 
 	const isAdmin = $derived(authStore.isAdmin);
 	const currentMode = $derived(systemSettings.authMode);
 
-	let showConfirmDialog = $state(false);
+	// Simple confirmation dialog (required → none)
+	let showSimpleConfirm = $state(false);
 	let pendingMode = $state<AuthMode>('required');
-	let showPatResult = $state(false);
+
+	// PAT dialog (none → required)
+	let showPatDialog = $state(false);
 	let generatedPat = $state('');
 	let patCopied = $state(false);
+	let isPreparingSwitch = $state(false);
 
-	function requestModeChange(mode: AuthMode) {
+	async function requestModeChange(mode: AuthMode) {
 		if (mode === currentMode) return;
 		pendingMode = mode;
-		showConfirmDialog = true;
-	}
 
-	async function confirmModeChange() {
-		showConfirmDialog = false;
-
-		updateSystemSettings({ authMode: pendingMode });
-
-		// If switching from no-auth to with-auth, generate PAT for current user
-		if (pendingMode === 'required' && currentMode === 'none') {
+		if (currentMode === 'none' && mode === 'required') {
+			// Switching to with-auth: regenerate PAT first, then show dialog
+			isPreparingSwitch = true;
 			try {
 				const pat = await authStore.regeneratePAT();
 				generatedPat = pat;
-				showPatResult = true;
-			} catch {
-				// User may already have a PAT
+				showPatDialog = true;
+			} catch (error) {
+				debug.error('settings', 'Failed to regenerate PAT for auth mode switch:', error);
+				addNotification({ type: 'error', title: 'Error', message: 'Failed to prepare authentication switch' });
+			} finally {
+				isPreparingSwitch = false;
 			}
+		} else {
+			showSimpleConfirm = true;
 		}
+	}
+
+	function confirmSimpleChange() {
+		showSimpleConfirm = false;
+		updateSystemSettings({ authMode: pendingMode });
+	}
+
+	async function confirmWithAuthSwitch() {
+		showPatDialog = false;
+
+		// Save auth mode
+		await updateSystemSettings({ authMode: 'required' });
+
+		// Logout all sessions (including current) — forces everyone to re-login
+		await authStore.logoutAll();
+
+		generatedPat = '';
+		patCopied = false;
+	}
+
+	function cancelPatDialog() {
+		showPatDialog = false;
+		generatedPat = '';
+		patCopied = false;
 	}
 
 	async function copyPat() {
@@ -43,12 +72,6 @@
 			patCopied = true;
 			setTimeout(() => { patCopied = false; }, 2000);
 		}
-	}
-
-	function dismissPat() {
-		showPatResult = false;
-		generatedPat = '';
-		patCopied = false;
 	}
 </script>
 
@@ -61,10 +84,12 @@
 		<!-- No Login -->
 		<button
 			type="button"
+			disabled={isPreparingSwitch}
 			class="w-full text-left p-4 bg-slate-100/80 dark:bg-slate-800/80 border rounded-xl transition-all
 				{currentMode === 'none'
 					? 'border-violet-500/50 ring-1 ring-violet-500/20'
-					: 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}"
+					: 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}
+				disabled:opacity-50 disabled:cursor-not-allowed"
 			onclick={() => requestModeChange('none')}
 		>
 			<div class="flex items-center gap-3.5">
@@ -92,10 +117,12 @@
 		<!-- With Login -->
 		<button
 			type="button"
+			disabled={isPreparingSwitch}
 			class="w-full text-left p-4 bg-slate-100/80 dark:bg-slate-800/80 border rounded-xl transition-all
 				{currentMode === 'required'
 					? 'border-violet-500/50 ring-1 ring-violet-500/20'
-					: 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}"
+					: 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}
+				disabled:opacity-50 disabled:cursor-not-allowed"
 			onclick={() => requestModeChange('required')}
 		>
 			<div class="flex items-center gap-3.5">
@@ -121,48 +148,82 @@
 		</button>
 	</div>
 
-	<!-- PAT Generated after switching to with-auth -->
-	{#if showPatResult && generatedPat}
-		<div class="mt-4 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
-			<p class="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">
-				Your Personal Access Token
-			</p>
-			<p class="text-xs text-amber-700 dark:text-amber-300 mb-3">
-				Authentication is now required. Save this token — you'll need it to log in. It won't be shown again.
-			</p>
-			<div class="flex items-center gap-2">
-				<code class="flex-1 px-3 py-2 rounded bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-xs font-mono text-slate-900 dark:text-slate-100 select-all break-all">
-					{generatedPat}
-				</code>
-				<button
-					onclick={copyPat}
-					class="shrink-0 px-3 py-2 rounded bg-amber-100 dark:bg-amber-900 hover:bg-amber-200 dark:hover:bg-amber-800 text-amber-800 dark:text-amber-200 text-xs font-medium transition-colors"
-				>
-					{patCopied ? 'Copied!' : 'Copy'}
-				</button>
-			</div>
-			<button
-				onclick={dismissPat}
-				class="mt-3 text-xs text-amber-600 dark:text-amber-400 hover:underline"
-			>
-				Dismiss
-			</button>
+	{#if isPreparingSwitch}
+		<div class="flex items-center gap-2 mt-4 text-sm text-slate-500">
+			<div class="w-4 h-4 border-2 border-violet-500/20 border-t-violet-600 rounded-full animate-spin"></div>
+			<span>Preparing authentication switch...</span>
 		</div>
 	{/if}
 </div>
 {/if}
 
-<!-- Confirm dialog -->
+<!-- Simple confirm dialog (required → none) -->
 <Dialog
-	bind:isOpen={showConfirmDialog}
-	onClose={() => { showConfirmDialog = false; }}
+	bind:isOpen={showSimpleConfirm}
+	onClose={() => { showSimpleConfirm = false; }}
 	type="info"
 	title="Change Authentication Mode"
-	message={pendingMode === 'none'
-		? 'Switching to Single User mode will disable login requirements. Existing users and sessions will be preserved but bypassed.'
-		: 'Switching to Multi User mode will require login. A Personal Access Token will be generated for your account.'}
+	message="Switching to No Login mode will disable login requirements. Existing users and sessions will be preserved but bypassed."
 	confirmText="Confirm"
 	cancelText="Cancel"
 	showCancel={true}
-	onConfirm={confirmModeChange}
+	onConfirm={confirmSimpleChange}
 />
+
+<!-- PAT dialog (none → required) -->
+<Dialog
+	bind:isOpen={showPatDialog}
+	onClose={cancelPatDialog}
+	type="warning"
+	title="Change Authentication Mode"
+	closable={false}
+	confirmText="Confirm"
+	cancelText="Cancel"
+	showCancel={true}
+	onConfirm={confirmWithAuthSwitch}
+>
+	{#snippet children()}
+		<div class="flex items-start space-x-4">
+			<div class="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/50 rounded-xl p-3 border">
+				<Icon name="lucide:triangle-alert" class="w-6 h-6 text-amber-600 dark:text-amber-400" />
+			</div>
+
+			<div class="flex-1 space-y-3">
+				<h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100">
+					Change Authentication Mode
+				</h3>
+				<p class="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+					Switching to With Login mode will require authentication. All sessions will be logged out and you will need this token to log in again.
+				</p>
+
+				<!-- PAT Display -->
+				<div class="p-3.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+					<div class="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">
+						<Icon name="lucide:key-round" class="w-4 h-4" />
+						<span>Your Personal Access Token</span>
+					</div>
+					<div class="flex items-center gap-2">
+						<code class="flex-1 px-3 py-2 rounded-md bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-xs font-mono text-slate-900 dark:text-slate-100 select-all break-all">
+							{generatedPat}
+						</code>
+						<button
+							type="button"
+							onclick={copyPat}
+							class="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg transition-all
+								{patCopied
+									? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+									: 'bg-amber-100 dark:bg-amber-900 hover:bg-amber-200 dark:hover:bg-amber-800 text-amber-800 dark:text-amber-200'}"
+							title="Copy token"
+						>
+							<Icon name={patCopied ? 'lucide:check' : 'lucide:copy'} class="w-4 h-4" />
+						</button>
+					</div>
+					<div class="flex items-center gap-1.5 mt-2 text-xs text-amber-600 dark:text-amber-400">
+						<Icon name="lucide:triangle-alert" class="w-3.5 h-3.5 shrink-0" />
+						<span>Copy this token now. It won't be shown again.</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/snippet}
+</Dialog>

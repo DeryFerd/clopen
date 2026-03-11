@@ -54,7 +54,7 @@ async function init(): Promise<void> {
 	if (Object.keys(mcpConfig).length > 0) {
 		debug.log('engine', `Open Code server: injecting ${Object.keys(mcpConfig).length} MCP server(s)`);
 		for (const [name, config] of Object.entries(mcpConfig)) {
-			debug.log('engine', `  → ${name}: ${config.type} (${(config as any).command?.join(' ') || (config as any).url})`);
+			debug.log('engine', `  → ${name}: ${config.type} (${(config as any).url || (config as any).command?.join(' ')})`);
 		}
 	}
 

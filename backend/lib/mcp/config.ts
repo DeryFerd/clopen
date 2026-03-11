@@ -6,11 +6,10 @@
  */
 
 import type { McpSdkServerConfigWithInstance, McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
-import type { McpLocalConfig } from '@opencode-ai/sdk';
+import type { McpRemoteConfig } from '@opencode-ai/sdk';
 import type { ServerConfig, ParsedMcpToolName, ServerName } from './types';
 import { serverRegistry, serverFactories } from './servers';
 import { debug } from '$shared/utils/logger';
-import { resolve } from 'path';
 import { SERVER_ENV } from '../shared/env';
 
 /**
@@ -21,7 +20,7 @@ import { SERVER_ENV } from '../shared/env';
  *
  * Type-safe: Server names and tool names are validated at compile time!
  */
-const mcpServersConfig: Record<ServerName, ServerConfig> = {
+export const mcpServersConfig: Record<ServerName, ServerConfig> = {
 	"weather-service": {
 		enabled: true,
 		tools: [
@@ -256,6 +255,8 @@ export function getMcpStats() {
  * This function strips the prefix and maps back using the mcpServers
  * registry — the SAME source that defines which tools exist.
  *
+ * Works for both remote HTTP MCP and legacy stdio MCP (same naming convention).
+ *
  * Returns null if the tool name is not one of our custom MCP tools.
  */
 export function resolveOpenCodeToolName(toolName: string): string | null {
@@ -263,7 +264,7 @@ export function resolveOpenCodeToolName(toolName: string): string | null {
 	if (toolName.startsWith('mcp__')) return toolName;
 
 	// Strip Open Code MCP server prefix if present
-	// Open Code prefixes with the stdio server name: "clopen-mcp_<tool>"
+	// Open Code prefixes with the server config key: "clopen-mcp_<tool>"
 	let rawName = toolName;
 	const ocPrefix = 'clopen-mcp_';
 	if (rawName.startsWith(ocPrefix)) {
@@ -288,32 +289,26 @@ export function resolveOpenCodeToolName(toolName: string): string | null {
 /**
  * Get MCP configuration for Open Code engine.
  *
- * Open Code expects MCP servers as local (stdio subprocess) or remote (HTTP URL).
- * We provide a single local MCP server that wraps all our custom tools.
- * The server communicates with the main Clopen process via an HTTP bridge
- * for tools that need in-process access (browser-automation).
+ * Open Code connects to a remote MCP HTTP server running in the main Clopen
+ * process. Tool handlers execute in-process — no subprocess, no bridge.
+ *
+ * This is the Open Code equivalent of Claude Code's in-process MCP servers.
  */
-export function getOpenCodeMcpConfig(): Record<string, McpLocalConfig> {
+export function getOpenCodeMcpConfig(): Record<string, McpRemoteConfig> {
 	// Check if any servers are enabled
 	const enabledServers = getEnabledServerNames();
 	if (enabledServers.length === 0) {
 		return {};
 	}
 
-	// Resolve path to the stdio server script
-	const stdioServerPath = resolve(import.meta.dir, 'stdio-server.ts');
 	const port = SERVER_ENV.PORT;
 
-	debug.log('mcp', `📦 Open Code MCP: stdio server at ${stdioServerPath}`);
-	debug.log('mcp', `📦 Open Code MCP: bridge port ${port}`);
+	debug.log('mcp', `📦 Open Code MCP: remote server at http://localhost:${port}/mcp`);
 
 	return {
 		'clopen-mcp': {
-			type: 'local',
-			command: ['bun', 'run', stdioServerPath],
-			environment: {
-				CLOPEN_PORT: String(port),
-			},
+			type: 'remote',
+			url: `http://localhost:${port}/mcp`,
 			enabled: true,
 			timeout: 10000,
 		},

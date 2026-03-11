@@ -18,7 +18,7 @@ import { debug } from '$shared/utils/logger';
 import { resolve } from 'path';
 import { isWindows } from '../../terminal/shell-utils';
 import { existsSync } from '../../terminal/helpers';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 import { activePtyProcesses } from '../../terminal/pty-manager';
 
 export const sessionHandler = createRouter()

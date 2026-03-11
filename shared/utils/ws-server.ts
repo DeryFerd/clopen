@@ -312,7 +312,7 @@ export class WSRouter<
 			}),
 			handler: async ({ conn, data }) => {
 				// Import ws server to update context
-				const { ws: wsServer } = await import('$backend/shared/ws');
+				const { ws: wsServer } = await import('$backend/utils/ws');
 
 				// userId is set exclusively by auth handlers (auth:login, auth:setup, auth:accept-invite)
 				// ws:set-context only handles projectId
@@ -657,7 +657,7 @@ export class WSRouter<
 
 					// Register connection with ws singleton
 					try {
-						const { ws: wsServer } = await import('$backend/shared/ws');
+						const { ws: wsServer } = await import('$backend/utils/ws');
 						wsServer.register(conn);
 					} catch (err) {
 						debug.error('websocket', 'Failed to register connection:', err);
@@ -669,7 +669,7 @@ export class WSRouter<
 					// Unregister connection from ws singleton
 					// All registered cleanups are called automatically by unregister()
 					try {
-						const { ws: wsServer } = await import('$backend/shared/ws');
+						const { ws: wsServer } = await import('$backend/utils/ws');
 						wsServer.unregister(conn);
 					} catch (err) {
 						debug.error('websocket', 'Failed to unregister connection:', err);

@@ -6,7 +6,7 @@
 
 import { authQueries, settingsQueries } from '$backend/database/queries';
 import { generateSessionToken, generatePAT, generateInviteToken, hashToken, getTokenType } from './tokens';
-import { generateColorFromString, getInitials } from '$backend/shared/user-helpers';
+import { generateColorFromString, getInitials } from '$backend/utils/user-helpers';
 import { debug } from '$shared/utils/logger';
 
 /** Default session lifetime in days */

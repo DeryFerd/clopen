@@ -10,7 +10,7 @@
  * All operations work on the active tab automatically.
  */
 
-import { ws } from "$backend/shared/ws";
+import { ws } from "$backend/utils/ws";
 import { debug } from "$shared/utils/logger";
 import { browserMcpControl, browserPreviewServiceManager, type BrowserPreviewService } from "$backend/preview";
 import { projectContextService } from "$backend/mcp/project-context";

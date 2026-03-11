@@ -1,5 +1,5 @@
 import type { Elysia } from 'elysia';
-import { SERVER_ENV } from '../shared/env';
+import { SERVER_ENV } from '../utils/env';
 
 /**
  * Global Error Handler Middleware

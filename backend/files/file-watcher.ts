@@ -12,7 +12,7 @@
 import { watch, type FSWatcher, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join, relative, normalize, sep } from 'node:path';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 import { debug } from '$shared/utils/logger';
 import type { FileChange } from '$shared/types/filesystem';
 

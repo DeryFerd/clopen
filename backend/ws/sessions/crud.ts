@@ -14,7 +14,7 @@ import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import type { EngineType } from '$shared/types/engine';
 import { sessionQueries, messageQueries, projectQueries } from '../../database/queries';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 import { debug } from '$shared/utils/logger';
 
 export const crudHandler = createRouter()

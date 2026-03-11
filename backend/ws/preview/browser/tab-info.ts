@@ -7,7 +7,7 @@
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import { browserPreviewServiceManager } from '../../../preview/index';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 import { debug } from '$shared/utils/logger';
 
 export const tabInfoPreviewHandler = createRouter()

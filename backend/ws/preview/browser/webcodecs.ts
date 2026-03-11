@@ -9,7 +9,7 @@
 import { createRouter } from '$shared/utils/ws-server';
 import { t } from 'elysia';
 import { browserPreviewServiceManager } from '$backend/preview';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 
 export const streamPreviewHandler = createRouter()
 	// Start streaming

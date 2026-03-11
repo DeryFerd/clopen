@@ -9,7 +9,7 @@ if (typeof globalThis.Bun === 'undefined') {
 }
 
 // MUST be first import — cleans process.env before any other module reads it
-import { SERVER_ENV } from './shared/env';
+import { SERVER_ENV } from './utils/env';
 
 import { Elysia } from 'elysia';
 import { corsMiddleware } from './middleware/cors';
@@ -20,7 +20,7 @@ import { loggerMiddleware } from './middleware/logger';
 import { initializeDatabase, closeDatabase } from './database';
 import { disposeAllEngines } from './engine';
 import { debug } from '$shared/utils/logger';
-import { findAvailablePort } from './shared/port-utils';
+import { findAvailablePort } from './utils/port-utils';
 import { networkInterfaces } from 'os';
 import { resolve } from 'node:path';
 import { statSync } from 'node:fs';
@@ -33,7 +33,7 @@ import { handleMcpRequest, closeMcpServer } from './mcp/remote-server';
 
 // Auth middleware
 import { checkRouteAccess } from './auth/permissions';
-import { ws as wsServer } from './shared/ws';
+import { ws as wsServer } from './utils/ws';
 
 // Register auth gate on WebSocket router — blocks unauthenticated/unauthorized access
 wsRouter.setAuthMiddleware(async (conn, action) => {

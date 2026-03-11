@@ -19,13 +19,13 @@ Custom MCP (Model Context Protocol) tools for adding specialized functionality t
 ## Overview
 
 **What is Custom MCP Tools?**
-System for adding custom tools to AI engines with type-safe TypeScript definitions. Tools are defined once using `defineServer()` and automatically available to both Claude Code (in-process) and Open Code (stdio subprocess).
+System for adding custom tools to AI engines with type-safe TypeScript definitions. Tools are defined once using `defineServer()` and automatically available to both Claude Code (in-process) and Open Code (remote HTTP MCP server).
 
 **Features:**
 - Single source of truth — define tools once, use in both engines
 - In-process execution for Claude Code via `createSdkMcpServer`
-- Stdio subprocess for Open Code via `@modelcontextprotocol/sdk`
-- WebSocket bridge for tool handlers that need in-process access
+- Remote HTTP MCP server for Open Code via `createRemoteMcpServer`
+- Both engines execute handlers in-process (no subprocess, no bridge)
 - Type-safe with TypeScript
 - Auto metadata extraction and registration
 - Configuration-based enable/disable
@@ -91,7 +91,7 @@ import weather from './weather';
 import calculator from './calculator';
 import { buildServerRegistries } from './helper';
 
-const allServers = [
+export const allServers = [
   weather,
   calculator, // Simply add your server here!
   // Add more servers...
@@ -132,26 +132,24 @@ Tool available to Claude as: `mcp__calculator__calculate`
 
 ```
 backend/mcp/
-├── types.ts           # TypeScript type definitions (auto-inferred from metadata)
-├── config.ts          # User configuration (enabled, tools) + auto-merge with registry
-│                      #   + resolveOpenCodeToolName() & getOpenCodeMcpConfig()
-├── index.ts           # Main export point
-├── stdio-server.ts    # Standalone MCP stdio server for Open Code (subprocess)
-├── servers/           # Server implementations (single source of truth)
-│   ├── index.ts      # Auto-build registries from server array
-│   ├── helper.ts     # defineServer & buildServerRegistries functions
-│   ├── weather/      # Example: Weather service
-│   │   ├── index.ts  # Server definition using defineServer
+├── types.ts            # TypeScript type definitions (auto-inferred from metadata)
+├── config.ts           # User configuration (enabled, tools) + auto-merge with registry
+│                       #   + resolveOpenCodeToolName() & getOpenCodeMcpConfig()
+├── index.ts            # Main export point
+├── remote-server.ts    # Remote HTTP MCP server for Open Code (Streamable HTTP transport)
+├── project-context.ts  # Project context service for MCP tool handlers
+├── servers/            # Server implementations (single source of truth)
+│   ├── index.ts       # Auto-build registries from server array + export allServers
+│   ├── helper.ts      # defineServer, buildServerRegistries & createRemoteMcpServer
+│   ├── weather/       # Example: Weather service
+│   │   ├── index.ts   # Server definition using defineServer
 │   │   └── get-temperature.ts  # Tool handler implementation
 │   └── browser-automation/  # Example: Browser automation service
-│       ├── index.ts  # Server definition
-│       ├── session.ts  # Session management handlers
-│       ├── navigation.ts  # Navigation handlers
-│       └── ...       # Other tool handlers
-└── README.md         # This file
-
-backend/ws/mcp/          # WebSocket bridge route (lives in ws/ per convention)
-└── index.ts              # WS .http() route for stdio server → main server
+│       ├── index.ts   # Server definition
+│       ├── actions.ts # Browser action handlers
+│       ├── browser.ts # Browser instance management
+│       └── inspection.ts  # Page inspection handlers
+└── README.md          # This file
 ```
 
 ### Server Organization
@@ -205,29 +203,27 @@ servers/browser-automation/
 6. UI displays result (CustomMcpTool.svelte)
 ```
 
-**Open Code (stdio subprocess + WS bridge):**
+**Open Code (remote HTTP MCP server):**
 ```
 1. Server Definition (servers/weather/index.ts)
    └─> Same defineServer() — single source of truth
         ↓
-2. Open Code engine (opencode/stream.ts)
-   └─> Uses getOpenCodeMcpConfig() → spawns stdio-server.ts
+2. Remote MCP server (remote-server.ts)
+   └─> createRemoteMcpServer() registers tools from allServers
+   └─> Mounted at /mcp on the main Elysia server
         ↓
-3. stdio-server.ts (subprocess)
-   └─> Reads serverMetadata for tool schemas/descriptions
-   └─> Registers tools via @modelcontextprotocol/sdk
+3. Open Code engine (opencode/stream.ts)
+   └─> Uses getOpenCodeMcpConfig() → { type: 'remote', url: '/mcp' }
         ↓
-4. Open Code calls a tool → stdio-server receives JSON-RPC
+4. Open Code connects via Streamable HTTP transport
+   └─> Sends JSON-RPC tool calls to /mcp endpoint
         ↓
-5. stdio-server proxies via WSClient.http('mcp:execute', ...)
-        ↓
-6. WS bridge route (backend/ws/mcp/)
-   └─> Looks up handler from serverMetadata.toolDefs
+5. remote-server.ts handles the request
    └─> Executes handler in-process (same context as main server)
         ↓
-7. Response flows back: bridge → WSClient → stdio → Open Code
+6. Response flows back: HTTP → Open Code
         ↓
-8. UI displays result (CustomMcpTool.svelte)
+7. UI displays result (CustomMcpTool.svelte)
 ```
 
 ### Key Components
@@ -235,23 +231,25 @@ servers/browser-automation/
 **`defineServer`**
 Helper function to define MCP server with automatic metadata extraction.
 Stores both Claude SDK server instance AND raw tool definitions (`toolDefs`)
-for reuse by other transports (stdio server, bridge).
+for reuse by both engines.
 
 **`buildServerRegistries`**
 Function to build server registries from server array.
 
+**`createRemoteMcpServer`**
+Creates a `McpServer` instance (from `@modelcontextprotocol/sdk`) with tools
+registered from the same `RawToolDef` definitions used by Claude Code.
+Handlers execute directly in-process — no subprocess, no bridge.
+
 **`mcpServers`**
 Final configuration combining user config with server instances.
 
-**`stdio-server.ts`**
-Standalone MCP stdio server subprocess spawned by Open Code. Reads tool
-definitions from `serverMetadata` and proxies all calls to the main server
-via `WSClient.http()`. Uses `@modelcontextprotocol/sdk` for MCP protocol.
-
-**`backend/ws/mcp/`**
-WebSocket `.http()` route that receives tool calls from the stdio server
-and executes handlers in-process. Lives in `backend/ws/` per the WS
-module convention (see `backend/ws/README.md`).
+**`remote-server.ts`**
+Remote HTTP MCP server mounted at `/mcp` on the main Elysia server.
+Uses `WebStandardStreamableHTTPServerTransport` for the MCP protocol.
+Open Code connects to it via `type: 'remote'` config. Each session gets
+its own transport and `McpServer` instance. Handles session lifecycle
+(create, route, close) and graceful shutdown.
 
 ---
 
@@ -529,13 +527,13 @@ isMcpTool("Bash");  // false
 ```
 
 #### `getOpenCodeMcpConfig()`
-Returns MCP configuration for Open Code engine (spawns stdio subprocess).
+Returns MCP configuration for Open Code engine (remote HTTP MCP server).
 
 ```typescript
 import { getOpenCodeMcpConfig } from '$backend/mcp';
 
 const mcpConfig = getOpenCodeMcpConfig();
-// Returns: { 'clopen-mcp': { type: 'local', command: ['bun', 'run', '...'], ... } }
+// Returns: { 'clopen-mcp': { type: 'remote', url: 'http://localhost:9151/mcp', ... } }
 ```
 
 #### `resolveOpenCodeToolName(toolName)`
@@ -1084,36 +1082,28 @@ schema: {
 
 ### How It Works
 
-Open Code uses a **stdio subprocess** pattern for MCP tools. The integration has three parts:
+Open Code connects to a **remote HTTP MCP server** running in the main Clopen process. Tool handlers execute directly in-process — no subprocess, no bridge. This is architecturally identical to how Claude Code uses in-process MCP servers.
 
-1. **`stdio-server.ts`** — Standalone Bun subprocess that Open Code spawns. It registers tools from `serverMetadata` using `@modelcontextprotocol/sdk` and communicates with Open Code via stdin/stdout (JSON-RPC 2.0).
+1. **`remote-server.ts`** — HTTP MCP server mounted at `/mcp` on the main Elysia server. Uses `WebStandardStreamableHTTPServerTransport` from `@modelcontextprotocol/sdk` for the Streamable HTTP transport protocol.
 
-2. **`WSClient` bridge** — The stdio server uses `WSClient` from `shared/utils/ws-client.ts` to connect to the main Clopen server via WebSocket. Tool calls are proxied using the standard `.http()` request-response pattern.
+2. **`createRemoteMcpServer()`** — Factory in `servers/helper.ts` that creates a `McpServer` instance with tools registered from the same `RawToolDef` definitions used by Claude Code. Each MCP session gets its own server instance.
 
-3. **`backend/ws/mcp-bridge/`** — WS `.http()` route that receives bridge requests and executes tool handlers in-process. This is necessary because handlers like browser-automation need access to Puppeteer instances managed by the main server.
-
-### Why a Bridge?
-
-Tool handlers often need in-process access to resources managed by the main server (browser instances, project context, database connections). The stdio subprocess runs in a separate process and cannot access these directly. The WS bridge pattern solves this by:
-
-- Keeping tool **definitions** (schema, description) in the subprocess for MCP protocol
-- Proxying tool **execution** to the main server where handlers run in-process
-- Using the standard WSClient protocol (same as frontend), not custom WebSocket code
+3. **`getOpenCodeMcpConfig()`** — Returns `{ type: 'remote', url: 'http://localhost:<port>/mcp' }` so Open Code connects directly to the main server.
 
 ### Adding Open Code Support to New Tools
 
 No extra work needed! When you add a new tool via `defineServer()`, it's automatically available to both engines:
 
 - **Claude Code**: Uses the in-process `createSdkMcpServer` instance
-- **Open Code**: `stdio-server.ts` reads from `serverMetadata` and `mcpServers` — the same registries
+- **Open Code**: `remote-server.ts` uses `createRemoteMcpServer()` with the same `allServers` and `mcpServersConfig`
 
 ### File Locations
 
 | File | Location | Purpose |
 |------|----------|---------|
 | Tool definitions | `backend/mcp/servers/` | Single source of truth |
-| Stdio server | `backend/mcp/stdio-server.ts` | Subprocess for Open Code |
-| WS bridge route | `backend/ws/mcp/index.ts` | Bridge handler (in ws/) |
+| Remote MCP server | `backend/mcp/remote-server.ts` | HTTP server for Open Code |
+| Server factory | `backend/mcp/servers/helper.ts` | `createRemoteMcpServer()` |
 | Open Code config | `backend/mcp/config.ts` | `getOpenCodeMcpConfig()` |
 | Tool name resolver | `backend/mcp/config.ts` | `resolveOpenCodeToolName()` |
 
@@ -1125,7 +1115,7 @@ No extra work needed! When you add a new tool via `defineServer()`, it's automat
 - [Custom Tools](https://platform.claude.com/docs/en/agent-sdk/custom-tools.md)
 - [MCP in the SDK](https://platform.claude.com/docs/en/agent-sdk/mcp.md)
 - [MCP SDK (@modelcontextprotocol/sdk)](https://github.com/modelcontextprotocol/typescript-sdk)
-- [WebSocket API Documentation](../../../backend/ws/README.md)
+- [WebSocket API Documentation](../ws/README.md)
 - [Zod Documentation](https://zod.dev/)
 
 ---
@@ -1137,7 +1127,6 @@ For questions or issues:
 2. Review example implementations in `./servers/`
 3. Check console logs for error messages
 4. Review Claude Agent SDK documentation
-5. For WS bridge issues, see `backend/ws/README.md`
 
 ---
 

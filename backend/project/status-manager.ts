@@ -4,7 +4,7 @@
  */
 
 import { streamManager, type StreamState } from '../chat/stream-manager.js';
-import { ws } from '../shared/ws.js';
+import { ws } from '../utils/ws.js';
 
 // Interactive tools that block the stream waiting for user input
 const INTERACTIVE_TOOLS = new Set(['AskUserQuestion']);

@@ -6,7 +6,7 @@ import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import { gitService } from '../../git/git-service';
 import { projectQueries } from '../../database/queries/project-queries';
-import { ws as wsServer } from '../../shared/ws';
+import { ws as wsServer } from '../../utils/ws';
 
 export const statusHandler = createRouter()
 	.http('git:status', {

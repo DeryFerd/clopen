@@ -10,7 +10,7 @@ import type { McpRemoteConfig } from '@opencode-ai/sdk';
 import type { ServerConfig, ParsedMcpToolName, ServerName } from './types';
 import { serverRegistry, serverFactories } from './servers';
 import { debug } from '$shared/utils/logger';
-import { SERVER_ENV } from '../shared/env';
+import { SERVER_ENV } from '../utils/env';
 
 /**
  * User-defined MCP Servers Configuration

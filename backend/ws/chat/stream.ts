@@ -11,7 +11,7 @@ import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import { streamManager, type StreamEvent } from '../../chat/stream-manager';
 import { debug } from '$shared/utils/logger';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 import { broadcastPresence } from '../projects/status';
 import { sessionQueries, messageQueries } from '../../database/queries';
 

@@ -16,7 +16,7 @@ import {
 import { settingsQueries } from '$backend/database/queries';
 import { getTokenType } from '$backend/auth/tokens';
 import { authRateLimiter } from '$backend/auth/rate-limiter';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 
 const authUserSchema = t.Object({
 	id: t.String(),

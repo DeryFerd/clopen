@@ -18,7 +18,7 @@ import {
 	findSessionEnd,
 	INITIAL_NODE_ID
 } from '../../snapshot/helpers';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 
 export const restoreHandler = createRouter()
 	/**

@@ -8,7 +8,7 @@ import { BrowserVideoCapture } from './browser-video-capture.js';
 import { BrowserDialogHandler } from './browser-dialog-handler.js';
 import { BrowserNativeUIHandler } from './browser-native-ui-handler.js';
 import { browserMcpControl } from './browser-mcp-control.js';
-import { ws } from '$backend/shared/ws';
+import { ws } from '$backend/utils/ws';
 import { debug } from '$shared/utils/logger';
 import type {
 	BrowserTab,

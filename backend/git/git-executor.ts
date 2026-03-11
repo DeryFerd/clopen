@@ -4,7 +4,7 @@
  */
 
 import { debug } from '$shared/utils/logger';
-import { getCleanSpawnEnv } from '../shared/env';
+import { getCleanSpawnEnv } from '../utils/env';
 
 export interface GitExecResult {
 	stdout: string;

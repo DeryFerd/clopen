@@ -12,7 +12,7 @@ import { join } from 'path';
 import { isWindows, findGitBash } from '../../../terminal/shell-utils.js';
 import { engineQueries } from '../../../database/queries';
 import { debug } from '$shared/utils/logger';
-import { getCleanSpawnEnv } from '../../../shared/env';
+import { getCleanSpawnEnv } from '../../../utils/env';
 
 let _ready = false;
 let _initPromise: Promise<void> | null = null;

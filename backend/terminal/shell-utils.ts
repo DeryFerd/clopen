@@ -7,7 +7,7 @@ import { join } from 'path';
 import { spawn, type IPty } from 'bun-pty';
 
 import { debug } from '$shared/utils/logger';
-import { getCleanSpawnEnv } from '../shared/env';
+import { getCleanSpawnEnv } from '../utils/env';
 // Platform detection
 export const isWindows = process.platform === 'win32';
 export const isMacOS = process.platform === 'darwin';

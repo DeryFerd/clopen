@@ -16,7 +16,7 @@
  *
  * Usage:
  * ```ts
- * import { ws } from '$backend/shared/ws'
+ * import { ws } from '$backend/utils/ws'
  *
  * // Project-specific event
  * ws.emit.project(projectId, 'terminal:output', { content });
@@ -156,7 +156,7 @@ class WSServer {
 	/**
 	 * Ensure a connection is registered, hydrated, and return its wsId.
 	 * Handles the race condition where message handlers fire before the async
-	 * open handler completes its await import('$backend/shared/ws').
+	 * open handler completes its await import('$backend/utils/ws').
 	 */
 	private ensureRegistered(conn: WSConnection): string {
 		const existingId = this.resolveId(conn);

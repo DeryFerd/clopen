@@ -64,6 +64,14 @@
 		}
 	}
 
+	// Auto-redirect when current section becomes hidden
+	$effect(() => {
+		const isVisible = visibleSections.some(s => s.id === activeSection);
+		if (!isVisible && visibleSections.length > 0) {
+			setActiveSection(visibleSections[0].id);
+		}
+	});
+
 	// Get current section info
 	const currentSectionInfo = $derived(
 		settingsSections.find((s) => s.id === activeSection) || settingsSections[0]
@@ -231,7 +239,7 @@
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<AIEnginesSettings />
 							</div>
-						{:else if activeSection === 'team' && isAdmin}
+						{:else if activeSection === 'team' && isAdmin && !isNoAuth}
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<TeamSettings />
 								<div class="mt-6">

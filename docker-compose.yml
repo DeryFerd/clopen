@@ -1,0 +1,31 @@
+services:
+  clopen:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM oven/bun:latest
+        USER root
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            git \
+            curl \
+            chromium \
+            && rm -rf /var/lib/apt/lists/*
+        ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+        ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+        RUN curl -fsSL https://claude.ai/install.sh | bash
+        ENV PATH="/root/.claude/local:$PATH"
+        RUN curl -fsSL https://opencode.ai/install | bash
+        RUN bun add -g @myrialabs/clopen
+        EXPOSE 9141
+        CMD ["clopen", "--host", "0.0.0.0"]
+    restart: unless-stopped
+    ports:
+      - "${PORT:-9141}:9141"
+    volumes:
+      - clopen_data:/root/.clopen
+      - ${PROJECTS_DIR:-./projects}:/root/projects
+    environment:
+      - NODE_ENV=production
+
+volumes:
+  clopen_data:

@@ -1,18 +1,18 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { authStore } from '$frontend/lib/stores/features/auth.svelte';
-	import WorkspaceLayout from '$frontend/lib/components/workspace/WorkspaceLayout.svelte';
-	import ConnectionBanner from '$frontend/lib/components/common/ConnectionBanner.svelte';
-	import UpdateBanner from '$frontend/lib/components/common/UpdateBanner.svelte';
-	import LoadingScreen from '$frontend/lib/components/common/LoadingScreen.svelte';
-	import SetupPage from '$frontend/lib/components/auth/SetupPage.svelte';
-	import LoginPage from '$frontend/lib/components/auth/LoginPage.svelte';
-	import InvitePage from '$frontend/lib/components/auth/InvitePage.svelte';
-	import { backgroundTerminalService } from '$frontend/lib/services/terminal/background';
-	import { initializeMCPPreview } from '$frontend/lib/services/preview';
-	import { globalStreamMonitor } from '$frontend/lib/services/notification/global-stream-monitor';
-	import { tunnelStore } from '$frontend/lib/stores/features/tunnel.svelte';
-	import { startUpdateChecker, stopUpdateChecker } from '$frontend/lib/stores/ui/update.svelte';
+	import { authStore } from '$frontend/stores/features/auth.svelte';
+	import WorkspaceLayout from '$frontend/components/workspace/WorkspaceLayout.svelte';
+	import ConnectionBanner from '$frontend/components/common/feedback/ConnectionBanner.svelte';
+	import UpdateBanner from '$frontend/components/common/feedback/UpdateBanner.svelte';
+	import LoadingScreen from '$frontend/components/common/feedback/LoadingScreen.svelte';
+	import SetupPage from '$frontend/components/auth/SetupPage.svelte';
+	import LoginPage from '$frontend/components/auth/LoginPage.svelte';
+	import InvitePage from '$frontend/components/auth/InvitePage.svelte';
+	import { backgroundTerminalService } from '$frontend/services/terminal/background';
+	import { initializeMCPPreview } from '$frontend/services/preview';
+	import { globalStreamMonitor } from '$frontend/services/notification/global-stream-monitor';
+	import { tunnelStore } from '$frontend/stores/features/tunnel.svelte';
+	import { startUpdateChecker, stopUpdateChecker } from '$frontend/stores/ui/update.svelte';
 
 	let servicesInitialized = false;
 

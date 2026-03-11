@@ -10,10 +10,10 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { generateAnonymousUser, generateColorFromString, getInitials } from '../../lib/user/helpers';
-import type { AnonymousUser } from '../../lib/user/helpers';
-import { ws } from '$backend/lib/utils/ws';
-import { settingsQueries } from '$backend/lib/database/queries';
+import { generateAnonymousUser, generateColorFromString, getInitials } from '../../utils/user-helpers';
+import type { AnonymousUser } from '../../utils/user-helpers';
+import { ws } from '$backend/utils/ws';
+import { settingsQueries } from '$backend/database/queries';
 import { debug } from '$shared/utils/logger';
 
 /**

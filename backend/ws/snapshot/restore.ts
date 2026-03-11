@@ -8,8 +8,8 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { messageQueries, sessionQueries, projectQueries, checkpointQueries } from '../../lib/database/queries';
-import { snapshotService } from '../../lib/snapshot/snapshot-service';
+import { messageQueries, sessionQueries, projectQueries, checkpointQueries } from '../../database/queries';
+import { snapshotService } from '../../snapshot/snapshot-service';
 import { debug } from '$shared/utils/logger';
 import {
 	buildCheckpointTree,
@@ -17,8 +17,8 @@ import {
 	findCheckpointForHead,
 	findSessionEnd,
 	INITIAL_NODE_ID
-} from '../../lib/snapshot/helpers';
-import { ws } from '$backend/lib/utils/ws';
+} from '../../snapshot/helpers';
+import { ws } from '$backend/utils/ws';
 
 export const restoreHandler = createRouter()
 	/**
@@ -121,7 +121,7 @@ export const restoreHandler = createRouter()
 			debug.log('snapshot', 'HEAD cleared (initial state)');
 
 			// Clear latest_sdk_session_id so next chat starts fresh
-			const db = (await import('../../lib/database')).getDatabase();
+			const db = (await import('../../database')).getDatabase();
 			db.prepare(`UPDATE chat_sessions SET latest_sdk_session_id = NULL WHERE id = ?`).run(sessionId);
 
 			// Clear checkpoint_tree_state

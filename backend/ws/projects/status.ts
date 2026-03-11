@@ -12,9 +12,9 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { getProjectStatusData, updateUserPresence } from '../../lib/project/status-manager';
-import { streamManager } from '../../lib/chat/stream-manager';
-import { ws } from '$backend/lib/utils/ws';
+import { getProjectStatusData, updateUserPresence } from '../../project/status-manager';
+import { streamManager } from '../../chat/stream-manager';
+import { ws } from '$backend/utils/ws';
 import { debug } from '$shared/utils/logger';
 
 /**

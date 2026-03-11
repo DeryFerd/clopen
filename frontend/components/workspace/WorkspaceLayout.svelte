@@ -1,0 +1,165 @@
+<script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { browser } from '$frontend/app-environment';
+
+	// Stores
+	import {
+		workspaceState,
+		initializeWorkspace,
+	} from '$frontend/stores/ui/workspace.svelte';
+	import { appState, setAppLoading, setAppInitialized, restoreLastView, restoreUnreadSessions } from '$frontend/stores/core/app.svelte';
+	import { projectState } from '$frontend/stores/core/projects.svelte';
+	import { sessionState } from '$frontend/stores/core/sessions.svelte';
+
+	// Components
+	import DesktopLayout from './layout/DesktopLayout.svelte';
+	import MobileLayout from './layout/MobileLayout.svelte';
+	import LoadingScreen from '$frontend/components/common/feedback/LoadingScreen.svelte';
+	import ModalProvider from '$frontend/components/common/overlay/ModalProvider.svelte';
+	import SettingsModal from '$frontend/components/settings/SettingsModal.svelte';
+	import HistoryModal from '$frontend/components/history/HistoryModal.svelte';
+
+	// Services
+	import { initializeTheme } from '$frontend/utils/theme';
+	import { initializeStore } from '$frontend/stores/core/app.svelte';
+	import { initializeProjects } from '$frontend/stores/core/projects.svelte';
+	import { initializeSessions } from '$frontend/stores/core/sessions.svelte';
+	import { initializeNotifications } from '$frontend/stores/ui/notification.svelte';
+	import { applyServerSettings, loadSystemSettings } from '$frontend/stores/features/settings.svelte';
+	import { initPresence } from '$frontend/stores/core/presence.svelte';
+	import ws from '$frontend/utils/ws';
+	import { debug } from '$shared/utils/logger';
+
+	const { children } = $props();
+
+	// Responsive state
+	let isMobile = $state(false);
+	let windowWidth = $state(0);
+
+	// Chat History modal state
+	let showHistoryModal = $state(false);
+
+	function closeHistoryModal() {
+		showHistoryModal = false;
+	}
+
+	// Loading state
+	let loadingProgress = $state(0);
+	let loadingText = $state('Initializing Workspace...');
+
+	// Set progress directly — CSS transition in LoadingScreen handles smooth animation
+	function setProgress(value: number, text?: string) {
+		loadingProgress = value;
+		if (text) loadingText = text;
+	}
+
+	// Responsive handler
+	function handleResize() {
+		if (browser) {
+			windowWidth = window.innerWidth;
+			isMobile = windowWidth < 1024;
+		}
+	}
+
+	// Initialize
+	onMount(async () => {
+		handleResize();
+		window.addEventListener('resize', handleResize);
+
+		setAppLoading(true);
+
+		try {
+			// Step 1: Core initialization (theme, workspace, notifications — all sync/localStorage)
+			setProgress(10, 'Initializing core systems...');
+			initializeTheme();
+			initializeStore();
+			initializeNotifications();
+			initializeWorkspace();
+
+			// Step 2: WebSocket is already connected (auth completed before this mounts)
+			setProgress(20, 'Connecting...');
+			await ws.waitUntilConnected(10000);
+
+			// Step 3: Restore user state from server
+			setProgress(30, 'Restoring state...');
+			let serverState: { currentProjectId: string | null; lastView: string | null; settings: any; unreadSessions: any } | null = null;
+			try {
+				serverState = await ws.http('user:restore-state', {});
+				debug.log('workspace', 'Server state restored:', serverState);
+			} catch (err) {
+				debug.warn('workspace', 'Failed to restore server state, using defaults:', err);
+			}
+
+			// Step 4: Apply restored state + load system settings + setup presence
+			setProgress(40);
+			if (serverState?.settings) {
+				applyServerSettings(serverState.settings);
+			}
+			restoreLastView(serverState?.lastView);
+			restoreUnreadSessions(serverState?.unreadSessions);
+			await loadSystemSettings();
+			initPresence();
+
+			// Step 5: Load projects (with server-restored currentProjectId)
+			setProgress(50, 'Loading projects...');
+			await initializeProjects(serverState?.currentProjectId);
+
+			// Step 6: Load sessions
+			setProgress(70, 'Restoring sessions...');
+			await initializeSessions();
+
+			// Step 7: Ready
+			setProgress(100, 'Ready!');
+		} catch (error) {
+			debug.error('workspace', 'Initialization error:', error);
+			setProgress(100, 'Error during initialization');
+		} finally {
+			// Small delay for CSS transition to finish, then dismiss loading screen
+			setTimeout(() => {
+				setAppInitialized();
+			}, 100);
+		}
+	});
+
+	onDestroy(() => {
+		if (browser) {
+			window.removeEventListener('resize', handleResize);
+		}
+	});
+</script>
+
+<!-- Loading Screen -->
+<LoadingScreen bind:isVisible={appState.isAppLoading} progress={loadingProgress} {loadingText} />
+
+<!-- Main Workspace Layout -->
+<div
+	class="h-full w-full overflow-hidden {isMobile ? 'bg-white/90 dark:bg-slate-900/98' : 'bg-slate-50 dark:bg-slate-900/70'} text-slate-900 dark:text-slate-100 font-sans"
+>
+	<!-- Skip link for accessibility -->
+	<a
+		href="#main-content"
+		class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-violet-600 focus:text-white"
+	>
+		Skip to main content
+	</a>
+
+	{#if isMobile}
+		<!-- Mobile Layout -->
+		<div class="flex flex-col h-full w-full" in:fade={{ duration: 200 }}>
+			<MobileLayout />
+		</div>
+	{:else}
+		<!-- Desktop Layout -->
+		<DesktopLayout />
+	{/if}
+</div>
+
+<!-- Modal Provider -->
+<ModalProvider />
+
+<!-- Settings Modal -->
+<SettingsModal />
+
+<!-- History Modal -->
+<HistoryModal bind:isOpen={showHistoryModal} onClose={closeHistoryModal} />

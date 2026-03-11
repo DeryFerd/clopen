@@ -11,9 +11,9 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { initializeDatabase } from '../../lib/database';
-import { projectQueries } from '../../lib/database/queries';
-import { ws } from '$backend/lib/utils/ws';
+import { initializeDatabase } from '../../database';
+import { projectQueries } from '../../database/queries';
+import { ws } from '$backend/utils/ws';
 
 export const crudHandler = createRouter()
 	// List all projects for the current user

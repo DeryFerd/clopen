@@ -11,9 +11,9 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { ptySessionManager } from '../../lib/terminal/pty-session-manager';
+import { ptySessionManager } from '../../terminal/pty-session-manager';
 import { debug } from '$shared/utils/logger';
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/utils/ws';
 
 export const streamHandler = createRouter()
 	// Send keyboard input to terminal

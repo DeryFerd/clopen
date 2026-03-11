@@ -9,7 +9,7 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { messageQueries } from '../../lib/database/queries';
+import { messageQueries } from '../../database/queries';
 import { formatDatabaseMessage } from '$shared/utils/message-formatter';
 
 export const crudHandler = createRouter()

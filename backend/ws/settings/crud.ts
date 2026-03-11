@@ -9,8 +9,8 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { settingsQueries } from '../../lib/database/queries';
-import { initializeEngine } from '../../lib/engine';
+import { settingsQueries } from '../../database/queries';
+import { initializeEngine } from '../../engine';
 import { CLAUDE_CODE_MODELS, registerModels } from '$shared/constants/engines';
 import type { EngineType } from '$shared/types/engine';
 

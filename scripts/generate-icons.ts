@@ -36,7 +36,7 @@ export type LucideIconName = keyof typeof lucideIconRegistry;
 `;
 	
 	// Write the file using Bun.write
-	await Bun.write('src/lib/components/common/lucide-icons.ts', lucideIconsContent);
+	await Bun.write('src/components/common/lucide-icons.ts', lucideIconsContent);
 	console.log(`Generated lucide-icons.ts with ${iconNames.length} icons`);
 }
 
@@ -75,7 +75,7 @@ export type MaterialIconName = keyof typeof materialIconRegistry;
 `;
 	
 	// Write the file using Bun.write
-	await Bun.write('src/lib/components/common/material-icons.ts', materialIconsContent);
+	await Bun.write('src/components/common/material-icons.ts', materialIconsContent);
 	console.log(`Generated material-icons.ts with ${iconNames.length} icons`);
 }
 

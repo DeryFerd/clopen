@@ -6,8 +6,8 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { browserPreviewServiceManager } from '../../../lib/preview/index';
-import { ws } from '$backend/lib/utils/ws';
+import { browserPreviewServiceManager } from '../../../preview/index';
+import { ws } from '$backend/utils/ws';
 import type { KeyInput } from 'puppeteer';
 import { debug } from '$shared/utils/logger';
 import { sleep } from '$shared/utils/async';

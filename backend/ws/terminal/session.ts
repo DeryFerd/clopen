@@ -12,14 +12,14 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { ptySessionManager } from '../../lib/terminal/pty-session-manager';
-import { terminalStreamManager } from '../../lib/terminal/stream-manager';
+import { ptySessionManager } from '../../terminal/pty-session-manager';
+import { terminalStreamManager } from '../../terminal/stream-manager';
 import { debug } from '$shared/utils/logger';
 import { resolve } from 'path';
-import { isWindows } from '../../lib/terminal/shell-utils';
-import { existsSync } from '../../lib/terminal/helpers';
-import { ws } from '$backend/lib/utils/ws';
-import { activePtyProcesses } from '../../lib/terminal/pty-manager';
+import { isWindows } from '../../terminal/shell-utils';
+import { existsSync } from '../../terminal/helpers';
+import { ws } from '$backend/utils/ws';
+import { activePtyProcesses } from '../../terminal/pty-manager';
 
 export const sessionHandler = createRouter()
 	// Create new terminal session

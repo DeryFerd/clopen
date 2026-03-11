@@ -9,10 +9,10 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { terminalStreamManager } from '../../lib/terminal/stream-manager';
+import { terminalStreamManager } from '../../terminal/stream-manager';
 import { debug } from '$shared/utils/logger';
-import { ws } from '$backend/lib/utils/ws';
-import { ptySessionManager } from '../../lib/terminal/pty-session-manager';
+import { ws } from '$backend/utils/ws';
+import { ptySessionManager } from '../../terminal/pty-session-manager';
 
 export const persistenceHandler = createRouter()
 	// Get stream status

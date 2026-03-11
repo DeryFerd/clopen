@@ -3,10 +3,14 @@
  *
  * Stores both the Claude SDK server instance AND raw tool definitions
  * so the same source can be used for Claude Code (in-process) and
- * Open Code (stdio subprocess via @modelcontextprotocol/sdk).
+ * Open Code (remote HTTP MCP via @modelcontextprotocol/sdk).
+ *
+ * Claude Code: createSdkMcpServer() → in-process MCP server
+ * Open Code:   createRemoteMcpServer() → HTTP MCP server (same process, same handlers)
  */
 
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { z } from "zod";
 
 /**
@@ -35,8 +39,7 @@ type ToolHandler<TSchema extends Record<string, z.ZodType<any>> | undefined> =
  * Raw tool definition — schema, description, and handler.
  * Single source of truth used by:
  * - Claude Code: in-process via createSdkMcpServer
- * - Open Code stdio: schema/description for registration, handler via bridge
- * - MCP bridge: handler for in-process execution
+ * - Open Code: remote HTTP MCP via createRemoteMcpServer (in-process handlers)
  */
 export interface RawToolDef {
 	description: string;
@@ -151,4 +154,47 @@ export function buildServerRegistries<
 			[K in T[number]['meta']['name']]: () => Extract<T[number], { meta: { name: K } }>['server']
 		}
 	};
+}
+
+// ============================================================================
+// Remote MCP Server for Open Code (HTTP transport, in-process execution)
+// ============================================================================
+
+/**
+ * Create a McpServer instance (from @modelcontextprotocol/sdk) with tools registered
+ * from the same RawToolDef definitions used by Claude Code.
+ *
+ * This is the Open Code equivalent of createSdkMcpServer() for Claude Code.
+ * Handlers execute directly in-process — no subprocess, no bridge.
+ *
+ * @param servers - Server definitions from defineServer()
+ * @param enabledConfig - Which servers/tools are enabled (from mcpServersConfig)
+ */
+export function createRemoteMcpServer(
+	servers: readonly ServerWithMeta<string, readonly string[]>[],
+	enabledConfig: Record<string, { enabled: boolean; tools: readonly string[] }>
+): McpServer {
+	const mcpServer = new McpServer({
+		name: 'clopen-mcp',
+		version: '1.0.0',
+	});
+
+	for (const srv of servers) {
+		const config = enabledConfig[srv.meta.name];
+		if (!config?.enabled) continue;
+
+		for (const toolName of config.tools) {
+			const def = srv.meta.toolDefs[toolName as string];
+			if (!def) continue;
+
+			mcpServer.registerTool(toolName as string, {
+				description: def.description,
+				inputSchema: def.schema,
+			}, async (args: Record<string, unknown>) => {
+				return await def.handler(args) as any;
+			});
+		}
+	}
+
+	return mcpServer;
 }

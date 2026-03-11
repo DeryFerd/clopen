@@ -27,7 +27,6 @@ import { filesRouter } from './files';
 import { systemRouter } from './system';
 import { tunnelRouter } from './tunnel';
 import { gitRouter } from './git';
-import { mcpRouter } from './mcp';
 import { engineRouter } from './engine';
 
 // ============================================
@@ -62,9 +61,6 @@ export const wsRouter = createRouter()
 
 	// Git Source Control
 	.merge(gitRouter)
-
-	// MCP (bridge for Open Code stdio server)
-	.merge(mcpRouter)
 
 	// AI Engine Management
 	.merge(engineRouter);

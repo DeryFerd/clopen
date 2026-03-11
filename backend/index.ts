@@ -28,6 +28,9 @@ import { statSync } from 'node:fs';
 // Import WebSocket router
 import { wsRouter } from './ws';
 
+// MCP remote server for Open Code custom tools
+import { handleMcpRequest, closeMcpServer } from './lib/mcp/remote-server';
+
 // Auth middleware
 import { checkRouteAccess } from './lib/auth/permissions';
 import { ws as wsServer } from './lib/utils/ws';
@@ -73,6 +76,10 @@ const app = new Elysia()
 		timestamp: new Date().toISOString(),
 		environment: SERVER_ENV.NODE_ENV
 	}))
+
+	// MCP remote server endpoint for Open Code custom tools
+	// Handles GET (SSE stream), POST (JSON-RPC), DELETE (session close)
+	.all('/mcp', async ({ request }) => handleMcpRequest(request))
 
 	// Mount WebSocket router (all functionality now via WebSocket)
 	.use(wsRouter.asPlugin('/ws'));
@@ -152,6 +159,8 @@ startServer().catch((error) => {
 async function gracefulShutdown() {
 	console.log('\n🛑 Shutting down server...');
 	try {
+		// Close MCP remote server (before engines, as they may still reference it)
+		await closeMcpServer();
 		// Dispose all AI engines
 		await disposeAllEngines();
 		// Stop accepting new connections

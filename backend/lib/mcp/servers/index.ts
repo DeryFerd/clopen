@@ -14,8 +14,9 @@ import weather from './weather/index';
 import browserAutomation from './browser-automation/index';
 import { buildServerRegistries } from './helper';
 
-// Re-export types for stdio server
+// Re-export types and remote server factory
 export type { RawToolDef } from './helper';
+export { createRemoteMcpServer } from './helper';
 
 /**
  * All MCP Servers
@@ -23,7 +24,7 @@ export type { RawToolDef } from './helper';
  * Simply import and add new servers to this array.
  * Metadata and registry will be automatically built.
  */
-const allServers = [
+export const allServers = [
 	weather,
 	browserAutomation,
 	// Add more servers here...

@@ -4,6 +4,8 @@
  * Shared helpers used by engine status handlers.
  */
 
+type EngineCommand = 'claude' | 'opencode';
+
 export function getBackendOS(): 'windows' | 'macos' | 'linux' {
 	switch (process.platform) {
 		case 'win32': return 'windows';
@@ -12,31 +14,29 @@ export function getBackendOS(): 'windows' | 'macos' | 'linux' {
 	}
 }
 
-let _resolvedClaudeCommand: string | null = null;
+const resolvedCommands = new Map<EngineCommand, string>();
 
 /**
- * Resolves the correct Claude CLI command for the current platform.
- * On Windows, tries 'claude' first, then 'claude.cmd' as a fallback
- * for older Claude CLI installations. Result is cached.
+ * Resolves the correct CLI command for the current platform.
+ * On Windows, tries the base command first, then falls back to
+ * command.cmd for older CLI installations. Result is cached.
  */
-export async function resolveClaudeCommand(): Promise<string> {
-	if (_resolvedClaudeCommand !== null) return _resolvedClaudeCommand;
+export async function resolveCommand(command: EngineCommand): Promise<string> {
+	const cached = resolvedCommands.get(command);
+	if (cached) return cached;
 
-	if (await _trySpawn('claude')) {
-		_resolvedClaudeCommand = 'claude';
-		return 'claude';
+	let resolved: string = command;
+
+	if (!await trySpawn(command) && process.platform === 'win32') {
+		const fallback = command + '.cmd';
+		if (await trySpawn(fallback)) resolved = fallback;
 	}
 
-	if (process.platform === 'win32' && await _trySpawn('claude.cmd')) {
-		_resolvedClaudeCommand = 'claude.cmd';
-		return 'claude.cmd';
-	}
-
-	_resolvedClaudeCommand = 'claude';
-	return 'claude';
+	resolvedCommands.set(command, resolved);
+	return resolved;
 }
 
-async function _trySpawn(command: string): Promise<boolean> {
+async function trySpawn(command: string): Promise<boolean> {
 	try {
 		const proc = Bun.spawn([command, '--version'], { stdout: 'pipe', stderr: 'pipe' });
 		return (await proc.exited) === 0;
@@ -45,33 +45,24 @@ async function _trySpawn(command: string): Promise<boolean> {
 	}
 }
 
-export async function detectCLI(command: string): Promise<{ installed: boolean; version: string | null }> {
+export async function detectCLI(command: EngineCommand): Promise<{ installed: boolean; version: string | null }> {
+	const resolved = await resolveCommand(command);
+
 	try {
-		const proc = Bun.spawn([command, '--version'], {
+		const proc = Bun.spawn([resolved, '--version'], {
 			stdout: 'pipe',
 			stderr: 'pipe'
 		});
 
 		const exitCode = await proc.exited;
-		if (exitCode !== 0) {
-			// On Windows, try .cmd fallback for older Claude CLI versions
-			if (process.platform === 'win32' && !command.endsWith('.cmd')) {
-				return detectCLI(command + '.cmd');
-			}
-			return { installed: false, version: null };
-		}
+		if (exitCode !== 0) return { installed: false, version: null };
 
 		const stdout = await new Response(proc.stdout).text();
 		const raw = stdout.trim();
 		// Extract only the version token (e.g. "2.1.52" from "2.1.52 (Claude Code)")
-		// Takes everything before the first whitespace or parenthesis
 		const version = raw.split(/[\s(]/)[0] || raw || null;
 		return { installed: true, version };
 	} catch {
-		// On Windows, try .cmd fallback on spawn error (ENOENT)
-		if (process.platform === 'win32' && !command.endsWith('.cmd')) {
-			return detectCLI(command + '.cmd');
-		}
 		return { installed: false, version: null };
 	}
 }

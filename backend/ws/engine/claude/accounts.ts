@@ -21,7 +21,7 @@ import { engineQueries } from '../../../lib/database/queries';
 import { resetEnvironment, getClaudeUserConfigDir } from '../../../lib/engine/adapters/claude/environment';
 import { debug } from '$shared/utils/logger';
 import { getCleanSpawnEnv } from '../../../lib/shared/env';
-import { resolveClaudeCommand } from '../utils';
+import { resolveCommand } from '../utils';
 
 // ── Helpers ──
 
@@ -191,7 +191,7 @@ export const accountsHandler = createRouter()
 		ptyEnv['CLAUDE_CONFIG_DIR'] = getClaudeUserConfigDir();
 		ptyEnv['BROWSER'] = 'false';
 
-		const claudeCmd = await resolveClaudeCommand();
+		const claudeCmd = await resolveCommand('claude');
 		let pty: ReturnType<typeof spawn>;
 		try {
 			pty = spawn(claudeCmd, ['setup-token'], {

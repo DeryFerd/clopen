@@ -7,8 +7,11 @@ import {
 	logout,
 	validateInviteToken,
 	regeneratePAT,
-	updateUserName
+	updateUserName,
+	createOrGetNoAuthAdmin,
+	needsSetup
 } from '$backend/lib/auth/auth-service';
+import { settingsQueries } from '$backend/lib/database/queries';
 import { getTokenType } from '$backend/lib/auth/tokens';
 import { authRateLimiter } from '$backend/lib/auth/rate-limiter';
 import { ws } from '$backend/lib/utils/ws';
@@ -36,6 +39,63 @@ export const loginHandler = createRouter()
 		})
 	}, async ({ data, conn }) => {
 		const result = createAdmin(data.name);
+
+		// Save authMode to system settings
+		const currentSettings = settingsQueries.get('system:settings');
+		const parsed = currentSettings?.value
+			? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
+			: {};
+		parsed.authMode = 'required';
+		settingsQueries.set('system:settings', JSON.stringify(parsed));
+
+		// Set auth on connection
+		const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);
+		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
+
+		return result;
+	})
+
+	// Setup no-auth mode — create default admin, save authMode setting
+	.http('auth:setup-no-auth', {
+		data: t.Object({}),
+		response: t.Object({
+			user: authUserSchema,
+			sessionToken: t.String(),
+			expiresAt: t.String()
+		})
+	}, async ({ conn }) => {
+		if (!needsSetup()) {
+			throw new Error('Setup already completed.');
+		}
+
+		// Save authMode to system settings
+		const currentSettings = settingsQueries.get('system:settings');
+		const parsed = currentSettings?.value
+			? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
+			: {};
+		parsed.authMode = 'none';
+		settingsQueries.set('system:settings', JSON.stringify(parsed));
+
+		// Create or get default admin
+		const result = createOrGetNoAuthAdmin();
+
+		// Set auth on connection
+		const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);
+		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
+
+		return result;
+	})
+
+	// Auto-login for no-auth mode (returning visitors)
+	.http('auth:auto-login-no-auth', {
+		data: t.Object({}),
+		response: t.Object({
+			user: authUserSchema,
+			sessionToken: t.String(),
+			expiresAt: t.String()
+		})
+	}, async ({ conn }) => {
+		const result = createOrGetNoAuthAdmin();
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);

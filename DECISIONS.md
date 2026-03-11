@@ -158,11 +158,11 @@
 
 ## Authentication & Collaboration
 
-### 18. Invite-Based Authentication with Admin/Member Roles
+### 18. Flexible Authentication (No-Auth + Multi-User)
 
-**Decision:** Token-based auth with invite system instead of anonymous access
-**Rationale:** Production deployments need access control. Admin sets up first, invites members via time-limited links (15 min expiry). Three token types: session (`clp_ses_*`, 30-day, auto-reconnect), PAT (`clp_pat_*`, permanent, cross-device login), invite (`clp_inv_*`, single-use). All tokens are 32 bytes (64 hex chars), SHA-256 hashed before storage. Rate limiting protects against brute-force (progressive lockout: 5 fails → 30s, 10 → 2m, 20 → 10m) with session tokens exempt. Admin-only settings (AI Engine, Updates, Data Management) hidden from members. CLI `clopen reset-pat` command provides admin recovery.
-**Trade-offs:** Requires initial setup step, invite links must be shared out-of-band.
+**Decision:** Dual authentication mode — single-user (no-auth) or multi-user (token-based) — configurable during setup wizard and togglable in Settings
+**Rationale:** Not all deployments need authentication. Personal/local use should be frictionless (no login), while team/production deployments need access control. The system stores `authMode` in `system:settings` (`'none'` or `'required'`). In no-auth mode, a default admin user is auto-created and all WS routes bypass authentication checks. Existing users and sessions are preserved when switching modes (bypassed, not deleted). Switching from no-auth to multi-user generates a PAT for the existing admin. Three token types remain for multi-user: session (`clp_ses_*`, 30-day, auto-reconnect), PAT (`clp_pat_*`, permanent, cross-device login), invite (`clp_inv_*`, single-use). Rate limiting, admin-only routes, and CLI `clopen reset-pat` recovery all apply in multi-user mode.
+**Trade-offs:** No-auth mode has no access control, admin must be aware when exposing via tunnel. UI sections (user management, invites, PAT settings) are hidden in no-auth mode to avoid confusion.
 
 ---
 
@@ -231,5 +231,13 @@
 **Decision:** Generate multiple path variations for Claude Code config lookup
 **Rationale:** Claude Code stores configs with different formats (Windows `C:\`, Unix `/c/`). Case-insensitive matching ensures MCP servers are found regardless of path format.
 **Trade-offs:** Slightly more complex lookup logic.
+
+---
+
+### 27. Multi-Step Setup Wizard
+
+**Decision:** Replace single-page admin setup with a multi-step wizard (auth mode → admin account → AI engines → preferences)
+**Rationale:** First-time setup involves multiple concerns — authentication strategy, account creation, engine availability, and appearance preferences. A step-by-step wizard reduces cognitive load and lets users skip optional steps (engines, preferences) while ensuring critical decisions (auth mode) are made upfront. The stepper UI shows progress and allows navigation back to completed steps.
+**Trade-offs:** More complex setup component, but each step is self-contained and reuses existing components/logic.
 
 ---

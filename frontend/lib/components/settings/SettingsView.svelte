@@ -12,6 +12,7 @@
 	import InviteManagement from './admin/InviteManagement.svelte';
 
 	const isAdmin = $derived(authStore.isAdmin);
+	const isNoAuth = $derived(authStore.isNoAuth);
 </script>
 
 <PageTemplate
@@ -27,8 +28,10 @@
 			<!-- Appearance Configuration -->
 			<AppearanceSettings />
 
-			<!-- User Settings -->
-			<UserSettings />
+			<!-- User Settings (hidden in no-auth mode) -->
+			{#if !isNoAuth}
+				<UserSettings />
+			{/if}
 
 			<!-- Notification Settings -->
 			<NotificationSettings />
@@ -36,8 +39,8 @@
 			<!-- General Settings -->
 			<GeneralSettings />
 
-			<!-- Admin-only sections -->
-			{#if isAdmin}
+			<!-- Admin-only sections (hidden in no-auth mode) -->
+			{#if isAdmin && !isNoAuth}
 				<UserManagement />
 				<InviteManagement />
 			{/if}

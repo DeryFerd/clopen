@@ -18,7 +18,7 @@
 - **Integrated Terminal** - Multi-tab terminal with full PTY control
 - **File Management** - Directory browsing, live editing, and real-time file watching
 - **Git Management** - Full source control: staging, commits, branches, push/pull, stash, log, conflict resolution
-- **Invite-Based Authentication** - Admin/member roles, invite links with auto-expiry, rate-limited login, CLI token recovery
+- **Flexible Authentication** - Single-user (no login) or multi-user mode with admin/member roles, invite links, rate-limited login, CLI token recovery — configurable during setup and in Settings
 - **Real-time Collaboration** - Multiple users can work on the same project simultaneously
 - **Built-in Cloudflare Tunnel** - Expose local projects publicly for testing and sharing
 
@@ -59,11 +59,18 @@ clopen
 
 Starts the server on `http://localhost:9141`.
 
-### Authentication
+### First-Time Setup
 
-On first launch, you'll be prompted to set up an admin account. After setup, you'll receive a **Personal Access Token (PAT)** — save it securely, as it's your login credential.
+On first launch, a setup wizard guides you through:
 
-To invite team members, go to **Settings > Admin > Invite** and generate an invite link (valid for 15 minutes).
+1. **Authentication mode** — Choose between **Single User** (no login required, ideal for personal use) or **Multi User** (login with Personal Access Token, supports team collaboration)
+2. **Admin account** — If multi-user mode is selected, create your admin account and save the generated PAT
+3. **AI Engines** — Check Claude Code and OpenCode installation status
+4. **Preferences** — Set theme, font size, and notification preferences
+
+You can change the authentication mode anytime in **Settings > General > Authentication**.
+
+To invite team members (multi-user mode), go to **Settings > Admin > Invite** and generate an invite link (valid for 15 minutes).
 
 If you lose your admin token:
 

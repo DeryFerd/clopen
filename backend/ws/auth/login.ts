@@ -2,6 +2,7 @@ import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import {
 	createAdmin,
+	getAuthMode,
 	loginWithToken,
 	createUserFromInvite,
 	logout,
@@ -96,6 +97,10 @@ export const loginHandler = createRouter()
 			expiresAt: t.String()
 		})
 	}, async ({ conn }) => {
+		if (getAuthMode() !== 'none') {
+			throw new Error('Auto-login is only available in no-auth mode');
+		}
+
 		const result = createOrGetNoAuthAdmin();
 
 		// Set auth on connection
@@ -254,6 +259,15 @@ export const loginHandler = createRouter()
 		})
 	}, async () => {
 		const count = logoutAllSessions();
+
+		// Broadcast force-logout to ALL connected clients before clearing auth.
+		// This ensures clients receive the event while still connected.
+		ws.emit.global('auth:force-logout', { reason: 'Auth mode changed' });
+
+		// Clear in-memory auth state on all active WebSocket connections.
+		// After this, the auth gate will block any further messages.
+		ws.clearAllAuth();
+
 		return { count };
 	})
 

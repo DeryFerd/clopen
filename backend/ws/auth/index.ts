@@ -14,4 +14,8 @@ export const authRouter = createRouter()
 	.emit('auth:error', t.Object({
 		error: t.String(),
 		blockedAction: t.String()
+	}))
+	// Declare auth:force-logout event (emitted when auth mode switches to required)
+	.emit('auth:force-logout', t.Object({
+		reason: t.String()
 	}));

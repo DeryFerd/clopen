@@ -581,6 +581,28 @@ class WSServer {
 	}
 
 	/**
+	 * Clear authentication state for ALL active connections.
+	 * Used when switching auth mode to 'required' — invalidates every
+	 * connection's in-memory auth so the auth gate blocks subsequent messages.
+	 * Returns the number of connections that were cleared.
+	 */
+	clearAllAuth(): number {
+		let cleared = 0;
+		for (const [id, state] of this.connectionState) {
+			if (state.authenticated) {
+				state.authenticated = false;
+				state.role = null;
+				state.sessionTokenHash = null;
+				cleared++;
+			}
+		}
+		if (cleared > 0) {
+			debug.log('websocket', `Cleared auth on ${cleared} active connection(s)`);
+		}
+		return cleared;
+	}
+
+	/**
 	 * Check if connection can receive data (backpressure check)
 	 */
 	private canSend(conn: WSConnection): boolean {

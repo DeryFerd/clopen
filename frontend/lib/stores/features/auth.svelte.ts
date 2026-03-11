@@ -31,6 +31,18 @@ let sessionToken = $state<string | null>(null);
 let personalAccessToken = $state<string | null>(null);
 let authMode = $state<AuthMode>('required');
 
+// Listen for server-side force-logout (auth mode switched to required)
+ws.on('auth:force-logout', (payload) => {
+	debug.log('auth', `Force logout received: ${payload.reason}`);
+	currentUser = null;
+	sessionToken = null;
+	personalAccessToken = null;
+	localStorage.removeItem(SESSION_TOKEN_KEY);
+	ws.setSessionToken(null);
+	authMode = 'required';
+	authState = 'login';
+});
+
 export const authStore = {
 	get authState() { return authState; },
 	get currentUser() { return currentUser; },

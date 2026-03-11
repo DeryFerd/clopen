@@ -9,9 +9,9 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { updateUserPresence, getProjectStatusData } from '../../lib/project/status-manager';
-import { streamManager } from '../../lib/chat/stream-manager';
-import { ws } from '$backend/lib/utils/ws';
+import { updateUserPresence, getProjectStatusData } from '../../project/status-manager';
+import { streamManager } from '../../chat/stream-manager';
+import { ws } from '$backend/shared/ws';
 import { debug } from '$shared/utils/logger';
 
 export const presenceHandler = createRouter()

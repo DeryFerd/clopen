@@ -7,7 +7,7 @@
  */
 
 import concurrently from 'concurrently';
-import { findAvailablePort } from '../backend/lib/shared/port-utils';
+import { findAvailablePort } from '../backend/shared/port-utils';
 
 const desiredBackend = process.env.PORT_BACKEND ? parseInt(process.env.PORT_BACKEND) : 9151;
 const desiredFrontend = process.env.PORT_FRONTEND ? parseInt(process.env.PORT_FRONTEND) : 9141;

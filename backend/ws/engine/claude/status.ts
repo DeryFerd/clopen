@@ -6,7 +6,7 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { engineQueries } from '../../../lib/database/queries';
+import { engineQueries } from '../../../database/queries';
 import { debug } from '$shared/utils/logger';
 import { getBackendOS, detectCLI } from '../utils';
 

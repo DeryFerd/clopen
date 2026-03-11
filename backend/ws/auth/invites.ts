@@ -1,7 +1,7 @@
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { createInvite, listInvites, revokeInvite } from '$backend/lib/auth/auth-service';
-import { ws } from '$backend/lib/utils/ws';
+import { createInvite, listInvites, revokeInvite } from '$backend/auth/auth-service';
+import { ws } from '$backend/shared/ws';
 
 export const inviteHandler = createRouter()
 	// Create invite token (admin only — enforced by auth gate)

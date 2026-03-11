@@ -11,7 +11,7 @@ import { t } from 'elysia';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { createRouter } from '$shared/utils/ws-server';
-import { initializeDatabase, getDatabase } from '../../lib/database';
+import { initializeDatabase, getDatabase } from '../../database';
 import { debug } from '$shared/utils/logger';
 
 /** Read current version from package.json */

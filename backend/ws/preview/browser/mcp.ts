@@ -6,7 +6,7 @@
 
 import { createRouter } from '$shared/utils/ws-server';
 import { t } from 'elysia';
-import { browserMcpControl } from '$backend/lib/preview';
+import { browserMcpControl } from '$backend/preview';
 import { debug } from '$shared/utils/logger';
 
 // Tab response types

@@ -9,7 +9,7 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { globalTunnelManager } from '../../lib/tunnel/global-tunnel-manager';
+import { globalTunnelManager } from '../../tunnel/global-tunnel-manager';
 import { debug } from '$shared/utils/logger';
 
 export const operationsHandler = createRouter()

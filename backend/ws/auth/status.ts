@@ -1,7 +1,7 @@
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { needsSetup, getUserById, getAuthMode, isOnboardingComplete } from '$backend/lib/auth/auth-service';
-import { ws } from '$backend/lib/utils/ws';
+import { needsSetup, getUserById, getAuthMode, isOnboardingComplete } from '$backend/auth/auth-service';
+import { ws } from '$backend/shared/ws';
 
 export const statusHandler = createRouter()
 	.http('auth:status', {

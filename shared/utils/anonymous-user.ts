@@ -10,7 +10,7 @@ import { debug } from '$shared/utils/logger';
 let wsClient: any = null;
 async function getWS() {
 	if (!wsClient && typeof window !== 'undefined') {
-		const module = await import('$frontend/lib/utils/ws');
+		const module = await import('$frontend/utils/ws');
 		wsClient = module.default;
 	}
 	return wsClient;

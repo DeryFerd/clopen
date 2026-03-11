@@ -9,9 +9,9 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { fileWatcher } from '$backend/lib/files/file-watcher';
+import { fileWatcher } from '$backend/files/file-watcher';
 import { debug } from '$shared/utils/logger';
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 export const watchHandler = createRouter()
 	// Start watching a project directory

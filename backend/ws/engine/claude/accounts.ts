@@ -16,11 +16,11 @@
 import { t } from 'elysia';
 import { spawn } from 'bun-pty';
 import { createRouter } from '$shared/utils/ws-server';
-import { ws } from '$backend/lib/utils/ws';
-import { engineQueries } from '../../../lib/database/queries';
-import { resetEnvironment, getClaudeUserConfigDir } from '../../../lib/engine/adapters/claude/environment';
+import { ws } from '$backend/shared/ws';
+import { engineQueries } from '../../../database/queries';
+import { resetEnvironment, getClaudeUserConfigDir } from '../../../engine/adapters/claude/environment';
 import { debug } from '$shared/utils/logger';
-import { getCleanSpawnEnv } from '../../../lib/shared/env';
+import { getCleanSpawnEnv } from '../../../shared/env';
 import { resolveCommand } from '../utils';
 
 // ── Helpers ──

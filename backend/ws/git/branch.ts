@@ -4,8 +4,8 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { gitService } from '../../lib/git/git-service';
-import { projectQueries } from '../../lib/database/queries/project-queries';
+import { gitService } from '../../git/git-service';
+import { projectQueries } from '../../database/queries/project-queries';
 
 const BranchSchema = t.Object({
 	name: t.String(),

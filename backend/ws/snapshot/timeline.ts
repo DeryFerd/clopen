@@ -7,7 +7,7 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { messageQueries, sessionQueries, checkpointQueries, snapshotQueries } from '../../lib/database/queries';
+import { messageQueries, sessionQueries, checkpointQueries, snapshotQueries } from '../../database/queries';
 import { debug } from '$shared/utils/logger';
 import {
 	extractMessageText,
@@ -17,8 +17,8 @@ import {
 	isDescendant,
 	getCheckpointFileStats,
 	INITIAL_NODE_ID
-} from '../../lib/snapshot/helpers';
-import type { CheckpointNode, TimelineResponse } from '../../lib/snapshot/helpers';
+} from '../../snapshot/helpers';
+import type { CheckpointNode, TimelineResponse } from '../../snapshot/helpers';
 import type { SDKMessage } from '$shared/types/messaging';
 
 export const timelineHandler = createRouter()

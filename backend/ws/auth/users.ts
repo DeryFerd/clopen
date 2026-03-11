@@ -1,6 +1,6 @@
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { listUsers, removeUser } from '$backend/lib/auth/auth-service';
+import { listUsers, removeUser } from '$backend/auth/auth-service';
 
 export const usersHandler = createRouter()
 	// List all users (admin only — enforced by auth gate)

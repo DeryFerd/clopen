@@ -16,8 +16,8 @@ import {
 	buildFileTree,
 	listDirectoryContents,
 	readFileContents
-} from '../../lib/files/file-reading';
-import { handlePathBrowsing } from '../../lib/files/path-browsing';
+} from '../../files/file-reading';
+import { handlePathBrowsing } from '../../files/path-browsing';
 
 // Bun-compatible existsSync implementation
 async function existsSync(path: string): Promise<boolean> {

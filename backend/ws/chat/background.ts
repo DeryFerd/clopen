@@ -7,9 +7,9 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { streamManager } from '../../lib/chat/stream-manager';
+import { streamManager } from '../../chat/stream-manager';
 import { debug } from '$shared/utils/logger';
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 export const backgroundHandler = createRouter()
 	// Start background stream (fire-and-forget)

@@ -466,7 +466,7 @@ try {
 
 **Backend:**
 ```typescript
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 .on('terminal:input', {
   data: t.Object({
@@ -589,7 +589,7 @@ ws.emit.global(event, payload)                  // → all connected clients
 Emit events from external sources (PTY, file watchers, etc.):
 
 ```typescript
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 // PTY output
 pty.onData((output) => {
@@ -632,7 +632,7 @@ browser.on('screencast-frame', (frame) => {
 
 **Backend - Connection Setup:**
 ```typescript
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 app.ws('/ws', {
   open(wsRaw) {
@@ -751,10 +751,10 @@ Merge another router.
 
 ### WebSocket Singleton API
 
-**File: `backend/lib/utils/ws.ts`**
+**File: `backend/shared/ws.ts`**
 
 ```typescript
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 // Emit events
 ws.emit.user(userId, 'event', payload)
@@ -781,7 +781,7 @@ ws.getConnectionCount(projectId?)
 
 ### Frontend Client API
 
-**File: `frontend/lib/utils/ws.ts`**
+**File: `frontend/shared/ws.ts`**
 
 ```typescript
 import ws from '$lib/utils/ws';
@@ -865,7 +865,7 @@ renderTree(tree);
 ```typescript
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 export const streamHandler = createRouter()
   .on('terminal:input', {
@@ -942,7 +942,7 @@ onDestroy(() => {
 ```typescript
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 export const interactHandler = createRouter()
   .on('browser:interact', {
@@ -1485,7 +1485,7 @@ cleanup();
 ### Event Emission
 
 ```typescript
-import { ws } from '$backend/lib/utils/ws';
+import { ws } from '$backend/shared/ws';
 
 // User-specific (all connections of a user)
 ws.emit.user(userId, 'event', payload);

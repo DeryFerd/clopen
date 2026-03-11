@@ -10,8 +10,8 @@
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import { debug } from '$shared/utils/logger';
-import { browserPreviewServiceManager } from '../../../lib/preview/index';
-import { ws } from '$backend/lib/utils/ws';
+import { browserPreviewServiceManager } from '../../../preview/index';
+import { ws } from '$backend/shared/ws';
 
 // Event forwarding is now handled automatically by BrowserPreviewServiceManager
 // when service instances are created, ensuring proper project isolation.

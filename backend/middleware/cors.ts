@@ -1,5 +1,5 @@
 import { cors } from '@elysiajs/cors';
-import { SERVER_ENV } from '../lib/shared/env';
+import { SERVER_ENV } from '../shared/env';
 
 /**
  * CORS Middleware Configuration

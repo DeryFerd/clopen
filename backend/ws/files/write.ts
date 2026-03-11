@@ -22,7 +22,7 @@ import {
 	duplicateOperation,
 	uploadFileOperation,
 	deleteOperation
-} from '../../lib/files/file-operations';
+} from '../../files/file-operations';
 
 export const writeHandler = createRouter()
 	// Write file operation

@@ -12,11 +12,11 @@ import {
 	updateUserName,
 	createOrGetNoAuthAdmin,
 	needsSetup
-} from '$backend/lib/auth/auth-service';
-import { settingsQueries } from '$backend/lib/database/queries';
-import { getTokenType } from '$backend/lib/auth/tokens';
-import { authRateLimiter } from '$backend/lib/auth/rate-limiter';
-import { ws } from '$backend/lib/utils/ws';
+} from '$backend/auth/auth-service';
+import { settingsQueries } from '$backend/database/queries';
+import { getTokenType } from '$backend/auth/tokens';
+import { authRateLimiter } from '$backend/auth/rate-limiter';
+import { ws } from '$backend/shared/ws';
 
 const authUserSchema = t.Object({
 	id: t.String(),
@@ -51,7 +51,7 @@ export const loginHandler = createRouter()
 		settingsQueries.set('system:settings', JSON.stringify(parsed));
 
 		// Set auth on connection
-		const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);
+		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
 		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
 
 		return result;
@@ -82,7 +82,7 @@ export const loginHandler = createRouter()
 		const result = createOrGetNoAuthAdmin();
 
 		// Set auth on connection
-		const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);
+		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
 		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
 
 		return result;
@@ -104,7 +104,7 @@ export const loginHandler = createRouter()
 		const result = createOrGetNoAuthAdmin();
 
 		// Set auth on connection
-		const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);
+		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
 		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
 
 		return result;
@@ -187,7 +187,7 @@ export const loginHandler = createRouter()
 			authRateLimiter.recordSuccess(ip);
 
 			// Set auth on connection
-			const tokenHash = (await import('$backend/lib/auth/tokens')).hashToken(result.sessionToken);
+			const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
 			ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
 
 			return result;

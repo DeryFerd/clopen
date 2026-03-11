@@ -18,7 +18,7 @@
 - **Integrated Terminal** - Multi-tab terminal with full PTY control
 - **File Management** - Directory browsing, live editing, and real-time file watching
 - **Git Management** - Full source control: staging, commits, branches, push/pull, stash, log, conflict resolution
-- **Flexible Authentication** - Single-user (no login) or multi-user mode with admin/member roles, invite links, rate-limited login, CLI token recovery — configurable during setup and in Settings
+- **Flexible Authentication** - No Login or With Login mode with admin/member roles, invite links, rate-limited login, CLI token recovery — configurable during setup and in Settings
 - **Real-time Collaboration** - Multiple users can work on the same project simultaneously
 - **Built-in Cloudflare Tunnel** - Expose local projects publicly for testing and sharing
 
@@ -49,7 +49,7 @@ Or manually via Bun:
 bun add -g @myrialabs/clopen
 ```
 
-You can also update from the **Settings > General > Updates** section in the web UI.
+You can also update from the **Settings > System > Updates** section in the web UI.
 
 ### Usage
 
@@ -63,14 +63,14 @@ Starts the server on `http://localhost:9141`.
 
 On first launch, a setup wizard guides you through:
 
-1. **Authentication mode** — Choose between **Single User** (no login required, ideal for personal use) or **Multi User** (login with Personal Access Token, supports team collaboration)
-2. **Admin account** — If multi-user mode is selected, create your admin account and save the generated PAT
+1. **Authentication mode** — Choose between **No Login** (no authentication required, ideal for personal/local use) or **With Login** (login with Personal Access Token, supports team collaboration)
+2. **Admin account** — If With Login mode is selected, create your admin account and save the generated PAT
 3. **AI Engines** — Check Claude Code and OpenCode installation status
 4. **Preferences** — Set theme, font size, and notification preferences
 
-You can change the authentication mode anytime in **Settings > General > Authentication**.
+You can change the authentication mode anytime in **Settings > Security > Authentication**.
 
-To invite team members (multi-user mode), go to **Settings > Admin > Invite** and generate an invite link (valid for 15 minutes).
+To invite team members (With Login mode), go to **Settings > Team > Invite** and generate an invite link (valid for 15 minutes).
 
 If you lose your admin token:
 

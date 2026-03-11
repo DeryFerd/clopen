@@ -5,9 +5,10 @@
 	// Import modular components
 	import ModelSettings from './model/ModelSettings.svelte';
 	import AppearanceSettings from './appearance/AppearanceSettings.svelte';
-	import UserSettings from './user/UserSettings.svelte';
+	import AccountSettings from './account/AccountSettings.svelte';
 	import NotificationSettings from './notifications/NotificationSettings.svelte';
-	import GeneralSettings from './general/GeneralSettings.svelte';
+	import SecuritySettings from './security/SecuritySettings.svelte';
+	import SystemSettings from './system/SystemSettings.svelte';
 	import UserManagement from './admin/UserManagement.svelte';
 	import InviteManagement from './admin/InviteManagement.svelte';
 
@@ -28,21 +29,20 @@
 			<!-- Appearance Configuration -->
 			<AppearanceSettings />
 
-			<!-- User Settings (hidden in no-auth mode) -->
-			{#if !isNoAuth}
-				<UserSettings />
-			{/if}
-
 			<!-- Notification Settings -->
 			<NotificationSettings />
 
-			<!-- General Settings -->
-			<GeneralSettings />
+			<!-- Account (hidden in no-auth mode) -->
+			{#if !isNoAuth}
+				<AccountSettings />
+			{/if}
 
-			<!-- Admin-only sections (hidden in no-auth mode) -->
-			{#if isAdmin && !isNoAuth}
+			<!-- Admin-only sections -->
+			{#if isAdmin}
 				<UserManagement />
 				<InviteManagement />
+				<SecuritySettings />
+				<SystemSettings />
 			{/if}
 
 		</div>

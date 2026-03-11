@@ -15,11 +15,12 @@
 	import ModelSettings from './model/ModelSettings.svelte';
 	import AIEnginesSettings from './engines/AIEnginesSettings.svelte';
 	import AppearanceSettings from './appearance/AppearanceSettings.svelte';
-	import UserSettings from './user/UserSettings.svelte';
+	import AccountSettings from './account/AccountSettings.svelte';
 	import NotificationSettings from './notifications/NotificationSettings.svelte';
-	import GeneralSettings from './general/GeneralSettings.svelte';
-	import UserManagement from './admin/UserManagement.svelte';
+	import TeamSettings from './admin/UserManagement.svelte';
 	import InviteManagement from './admin/InviteManagement.svelte';
+	import SecuritySettings from './security/SecuritySettings.svelte';
+	import SystemSettings from './system/SystemSettings.svelte';
 
 	// Responsive state
 	let isMobileMenuOpen = $state(false);
@@ -131,9 +132,9 @@
 			<div class="flex flex-1 min-h-0 relative">
 				<!-- Sidebar -->
 				<aside
-					class="flex flex-col w-68 shrink-0 bg-white dark:bg-slate-900/98 border-r border-slate-200 dark:border-slate-800
+					class="flex flex-col w-65 shrink-0 bg-white dark:bg-slate-900/98 border-r border-slate-200 dark:border-slate-800
 						{isMobile
-						? 'absolute left-0 top-0 bottom-0 z-10 w-70 shadow-[4px_0_20px_rgba(0,0,0,0.15)] dark:shadow-[4px_0_20px_rgba(0,0,0,0.3)] transition-transform duration-[250ms] ease-out'
+						? 'absolute left-0 top-0 bottom-0 z-10 w-70 shadow-[4px_0_20px_rgba(0,0,0,0.15)] dark:shadow-[4px_0_20px_rgba(0,0,0,0.3)] transition-transform duration-250 ease-out'
 						: ''}
 						{isMobile && !isMobileMenuOpen ? '-translate-x-full' : 'translate-x-0'}"
 				>
@@ -208,32 +209,36 @@
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<ModelSettings />
 							</div>
-						{:else if activeSection === 'engines'}
-							<div in:fly={{ x: 20, duration: 200 }}>
-								<AIEnginesSettings />
-							</div>
 						{:else if activeSection === 'appearance'}
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<AppearanceSettings />
-							</div>
-						{:else if activeSection === 'user'}
-							<div in:fly={{ x: 20, duration: 200 }}>
-								<UserSettings />
 							</div>
 						{:else if activeSection === 'notifications'}
 							<div in:fly={{ x: 20, duration: 200 }}>
 								<NotificationSettings />
 							</div>
-						{:else if activeSection === 'general'}
+						{:else if activeSection === 'account'}
 							<div in:fly={{ x: 20, duration: 200 }}>
-								<GeneralSettings />
+								<AccountSettings />
 							</div>
-						{:else if activeSection === 'admin' && isAdmin}
+						{:else if activeSection === 'engines' && isAdmin}
 							<div in:fly={{ x: 20, duration: 200 }}>
-								<UserManagement />
+								<AIEnginesSettings />
+							</div>
+						{:else if activeSection === 'team' && isAdmin}
+							<div in:fly={{ x: 20, duration: 200 }}>
+								<TeamSettings />
 								<div class="mt-6">
 									<InviteManagement />
 								</div>
+							</div>
+						{:else if activeSection === 'security' && isAdmin}
+							<div in:fly={{ x: 20, duration: 200 }}>
+								<SecuritySettings />
+							</div>
+						{:else if activeSection === 'system' && isAdmin}
+							<div in:fly={{ x: 20, duration: 200 }}>
+								<SystemSettings />
 							</div>
 						{/if}
 					</div>

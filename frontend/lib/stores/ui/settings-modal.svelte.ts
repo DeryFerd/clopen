@@ -9,10 +9,11 @@ export type SettingsSection =
 	| 'model'
 	| 'engines'
 	| 'appearance'
-	| 'user'
 	| 'notifications'
-	| 'general'
-	| 'admin';
+	| 'account'
+	| 'team'
+	| 'security'
+	| 'system';
 
 interface SettingsModalState {
 	isOpen: boolean;
@@ -33,7 +34,25 @@ export const settingsSections: SettingsSectionMeta[] = [
 		id: 'model',
 		label: 'Model',
 		icon: 'lucide:cpu',
-		description: 'Configure AI engine and model'
+		description: 'AI engine and model'
+	},
+	{
+		id: 'appearance',
+		label: 'Appearance',
+		icon: 'lucide:palette',
+		description: 'Theme and layout'
+	},
+	{
+		id: 'notifications',
+		label: 'Notifications',
+		icon: 'lucide:bell',
+		description: 'Sound and push notifications'
+	},
+	{
+		id: 'account',
+		label: 'Account',
+		icon: 'lucide:user',
+		description: 'Your profile and access'
 	},
 	{
 		id: 'engines',
@@ -43,36 +62,25 @@ export const settingsSections: SettingsSectionMeta[] = [
 		adminOnly: true
 	},
 	{
-		id: 'appearance',
-		label: 'Appearance',
-		icon: 'lucide:palette',
-		description: 'Theme and layout customization'
-	},
-	{
-		id: 'notifications',
-		label: 'Notifications',
-		icon: 'lucide:bell',
-		description: 'Sound and push notifications'
-	},
-	{
-		id: 'general',
-		label: 'General',
-		icon: 'lucide:settings-2',
-		description: 'Data management and security',
+		id: 'team',
+		label: 'Team',
+		icon: 'lucide:users',
+		description: 'Users and invites',
 		adminOnly: true
 	},
 	{
-		id: 'admin',
-		label: 'Admin',
+		id: 'security',
+		label: 'Security',
 		icon: 'lucide:shield',
-		description: 'Team and invite management',
+		description: 'Login and access control',
 		adminOnly: true
 	},
 	{
-		id: 'user',
-		label: 'User Profile',
-		icon: 'lucide:user',
-		description: 'Your profile and account'
+		id: 'system',
+		label: 'System',
+		icon: 'lucide:settings-2',
+		description: 'Updates and data',
+		adminOnly: true
 	}
 ];
 

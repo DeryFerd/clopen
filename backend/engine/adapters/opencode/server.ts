@@ -11,6 +11,7 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import { getOpenCodeMcpConfig } from '../../../mcp';
 import { debug } from '$shared/utils/logger';
+import { findAvailablePort } from '../../../utils/port-utils';
 
 const OPENCODE_PORT = 4096;
 const OPENCODE_HOST = '127.0.0.1';
@@ -58,9 +59,14 @@ async function init(): Promise<void> {
 		}
 	}
 
+	const actualPort = await findAvailablePort(OPENCODE_PORT);
+	if (actualPort !== OPENCODE_PORT) {
+		debug.log('engine', `Open Code port ${OPENCODE_PORT} in use, using ${actualPort} instead`);
+	}
+
 	const result = await createOpencode({
 		hostname: OPENCODE_HOST,
-		port: OPENCODE_PORT,
+		port: actualPort,
 		...(Object.keys(mcpConfig).length > 0 && {
 			config: { mcp: mcpConfig },
 		}),

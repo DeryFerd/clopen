@@ -5,7 +5,6 @@
 	import { addNotification } from '$frontend/stores/ui/notification.svelte';
 	import ws from '$frontend/utils/ws';
 	import type { ChatSession } from '$shared/types/database/schema';
-	import type { SDKMessage } from '$shared/types/messaging';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import AvatarBubble from '$frontend/components/common/display/AvatarBubble.svelte';
 	import Modal from '$frontend/components/common/overlay/Modal.svelte';
@@ -55,7 +54,6 @@
 
 	// Cache for session data to avoid multiple API calls
 	let sessionDataCache = $state<Record<string, {
-		messages: SDKMessage[];
 		title: string;
 		summary: string;
 		count: number;
@@ -64,87 +62,30 @@
 	}>>({});
 	let loadingSessionData = $state(false);
 
-	// Helper to get session data from cache or API
+	// Helper to get session data from cache or API (single session fallback)
 	async function getSessionData(sessionId: string) {
 		if (sessionDataCache[sessionId]) {
 			return sessionDataCache[sessionId];
 		}
 
 		try {
-			const messages = await ws.http('messages:list', { session_id: sessionId, include_all: true });
-
-			const firstUserMessage = messages.find((m: SDKMessage) => m.type === 'user');
-			let title = 'New Conversation';
-			if (firstUserMessage) {
-				let textContent = '';
-				if (typeof firstUserMessage.message.content === 'string') {
-					textContent = firstUserMessage.message.content;
-				} else if (Array.isArray(firstUserMessage.message.content)) {
-					const textBlocks = firstUserMessage.message.content.filter((c: any) => c.type === 'text');
-					textContent = textBlocks.map((b: any) => 'text' in b ? b.text : '').join(' ');
-				}
-
-				if (textContent) {
-					title = textContent.slice(0, 60) + (textContent.length > 60 ? '...' : '');
-				}
+			const previews = await ws.http('sessions:preview', { session_ids: [sessionId] });
+			const preview = previews[0];
+			if (preview) {
+				sessionDataCache[sessionId] = {
+					title: preview.title,
+					summary: preview.summary,
+					count: preview.count,
+					userCount: preview.userCount,
+					assistantCount: preview.assistantCount
+				};
+				return sessionDataCache[sessionId];
 			}
-
-			const assistantMessages = messages.filter((m: SDKMessage) => m.type === 'assistant');
-			let summary = 'No messages yet';
-			if (assistantMessages.length > 0) {
-				const lastMessage = assistantMessages[assistantMessages.length - 1];
-				const textBlocks = lastMessage.message.content.filter((c: any) => c.type === 'text');
-				if (textBlocks.length > 0) {
-					const fullText = textBlocks.map((b: any) => 'text' in b ? b.text : '').join(' ');
-					const cleanText = fullText.replace(/```[\s\S]*?```/g, '').trim();
-					summary = cleanText.slice(0, 100) + (cleanText.length > 100 ? '...' : '');
-				}
-			}
-
-			const userMessages = messages.filter((m: SDKMessage) => {
-				if (m.type !== 'user') return false;
-				let textContent = '';
-				if (typeof m.message.content === 'string') {
-					textContent = m.message.content;
-				} else if (Array.isArray(m.message.content)) {
-					const textBlocks = m.message.content.filter(c => c.type === 'text');
-					textContent = textBlocks.map(b => 'text' in b ? b.text : '').join(' ');
-				}
-				return textContent.trim().length > 0;
-			});
-
-			const totalBubbles = userMessages.length + assistantMessages.length;
-
-			const data = {
-				messages,
-				title,
-				summary,
-				count: totalBubbles,
-				userCount: userMessages.length,
-				assistantCount: assistantMessages.length
-			};
-
-			sessionDataCache[sessionId] = data;
-			debug.log('session', `Loaded session ${sessionId}:`, {
-				title,
-				totalMessages: messages.length,
-				userCount: userMessages.length,
-				assistantCount: assistantMessages.length,
-				totalBubbles: totalBubbles,
-				summary: summary.substring(0, 50)
-			});
-			return data;
 		} catch (error) {
 			debug.error('session', 'Error fetching session data:', error);
-			return {
-				messages: [],
-				title: 'New Conversation',
-				summary: 'No messages yet',
-				count: 0,
-				userCount: 0,
-				assistantCount: 0
-			};
 		}
+
+		return { title: 'New Conversation', summary: 'No messages yet', count: 0, userCount: 0, assistantCount: 0 };
 	}
 
 	function getMessageCount(sessionId: string): number {
@@ -167,12 +108,23 @@
 		loadingSessionData = true;
 		try {
 			// Sort newest first and load top 20 so new sessions are always included
-			const sortedSessions = [...sessions]
+			const sessionIds = [...sessions]
 				.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
-				.slice(0, 20);
-			await Promise.all(
-				sortedSessions.map(session => getSessionData(session.id))
-			);
+				.slice(0, 20)
+				.map(s => s.id);
+
+			if (sessionIds.length === 0) return;
+
+			const previews = await ws.http('sessions:preview', { session_ids: sessionIds });
+			for (const preview of previews) {
+				sessionDataCache[preview.session_id] = {
+					title: preview.title,
+					summary: preview.summary,
+					count: preview.count,
+					userCount: preview.userCount,
+					assistantCount: preview.assistantCount
+				};
+			}
 		} catch (error) {
 			debug.error('session', 'Error preloading session data:', error);
 		} finally {

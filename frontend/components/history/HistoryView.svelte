@@ -6,7 +6,6 @@
 	import { setCurrentView } from '$frontend/stores/core/app.svelte';
 	import ws from '$frontend/utils/ws';
 	import type { ChatSession, Project } from '$shared/types/database/schema';
-	import type { SDKMessage } from '$shared/types/messaging';
 	import Input from '../common/form/Input.svelte';
 	import Select from '../common/form/Select.svelte';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
@@ -62,7 +61,6 @@
 	
 	// Cache for session data to avoid multiple API calls
 	const sessionDataCache = $state<Record<string, {
-		messages: SDKMessage[];
 		title: string;
 		summary: string;
 		count: number;
@@ -71,95 +69,30 @@
 	}>>({});
 	let loadingSessionData = $state(true);
 
-	// Helper to get session data from cache or API
+	// Helper to get session data from cache or API (single session fallback)
 	async function getSessionData(sessionId: string) {
 		if (sessionDataCache[sessionId]) {
 			return sessionDataCache[sessionId];
 		}
 
 		try {
-			// Get messages from current HEAD checkpoint (active branch only)
-			const messages = await ws.http('messages:list', { session_id: sessionId, include_all: true });
-
-			// Get title from first user message in current HEAD
-			const firstUserMessage = messages.find((m: SDKMessage) => m.type === 'user');
-			let title = 'New Conversation';
-			if (firstUserMessage) {
-				// Handle content properly - it can be string or array of content blocks
-				let textContent = '';
-				if (typeof firstUserMessage.message.content === 'string') {
-					textContent = firstUserMessage.message.content;
-				} else if (Array.isArray(firstUserMessage.message.content)) {
-					// Extract text from content blocks
-					const textBlocks = firstUserMessage.message.content.filter((c: any) => c.type === 'text');
-					textContent = textBlocks.map((b: any) => 'text' in b ? b.text : '').join(' ');
-				}
-
-				if (textContent) {
-					title = textContent.slice(0, 60) + (textContent.length > 60 ? '...' : '');
-				}
+			const previews = await ws.http('sessions:preview', { session_ids: [sessionId] });
+			const preview = previews[0];
+			if (preview) {
+				sessionDataCache[sessionId] = {
+					title: preview.title,
+					summary: preview.summary,
+					count: preview.count,
+					userCount: preview.userCount,
+					assistantCount: preview.assistantCount
+				};
+				return sessionDataCache[sessionId];
 			}
-
-			// Get summary from last assistant message in current HEAD checkpoint
-			const assistantMessages = messages.filter((m: SDKMessage) => m.type === 'assistant');
-			let summary = 'No messages yet';
-			if (assistantMessages.length > 0) {
-				const lastMessage = assistantMessages[assistantMessages.length - 1];
-				const textBlocks = lastMessage.message.content.filter((c: any) => c.type === 'text');
-				if (textBlocks.length > 0) {
-					const fullText = textBlocks.map((b: any) => 'text' in b ? b.text : '').join(' ');
-					const cleanText = fullText.replace(/```[\s\S]*?```/g, '').trim();
-					summary = cleanText.slice(0, 150) + (cleanText.length > 150 ? '...' : '');
-				}
-			}
-
-			// Count user and assistant messages in current HEAD checkpoint
-			// Filter out empty user messages (same as ChatInterface.svelte timeline logic)
-			const userMessages = messages.filter((m: SDKMessage) => {
-				if (m.type !== 'user') return false;
-				// Extract text content
-				let textContent = '';
-				if (typeof m.message.content === 'string') {
-					textContent = m.message.content;
-				} else if (Array.isArray(m.message.content)) {
-					const textBlocks = m.message.content.filter(c => c.type === 'text');
-					textContent = textBlocks.map(b => 'text' in b ? b.text : '').join(' ');
-				}
-				return textContent.trim().length > 0;
-			});
-
-			const totalBubbles = userMessages.length + assistantMessages.length; // Total message bubbles in chat
-
-			const data = {
-				messages,
-				title,
-				summary,
-				count: totalBubbles, // Total bubbles (user + assistant with non-empty content)
-				userCount: userMessages.length, // Number of chat sessions/exchanges (non-empty user messages)
-				assistantCount: assistantMessages.length
-			};
-
-			sessionDataCache[sessionId] = data;
-			debug.log('session', `Loaded session ${sessionId}:`, {
-				title,
-				totalMessages: messages.length,
-				userCount: userMessages.length,
-				assistantCount: assistantMessages.length,
-				totalBubbles: totalBubbles,
-				summary: summary.substring(0, 50)
-			});
-			return data;
 		} catch (error) {
 			debug.error('session', 'Error fetching session data:', error);
-			return {
-				messages: [],
-				title: 'New Conversation',
-				summary: 'No messages yet',
-				count: 0,
-				userCount: 0,
-				assistantCount: 0
-			};
 		}
+
+		return { title: 'New Conversation', summary: 'No messages yet', count: 0, userCount: 0, assistantCount: 0 };
 	}
 
 	// Helper functions that use cached data
@@ -179,14 +112,23 @@
 		return sessionDataCache[sessionId]?.summary || 'No messages yet';
 	}
 
-	// Preload session data for visible sessions
+	// Preload session data for visible sessions using a single bulk request
 	async function preloadSessionData() {
 		loadingSessionData = true;
 		try {
-			// Load all sessions in parallel for better performance
-			await Promise.all(
-				sessions.slice(0, 20).map(session => getSessionData(session.id))
-			);
+			const sessionIds = sessions.slice(0, 20).map(s => s.id);
+			if (sessionIds.length === 0) return;
+
+			const previews = await ws.http('sessions:preview', { session_ids: sessionIds });
+			for (const preview of previews) {
+				sessionDataCache[preview.session_id] = {
+					title: preview.title,
+					summary: preview.summary,
+					count: preview.count,
+					userCount: preview.userCount,
+					assistantCount: preview.assistantCount
+				};
+			}
 		} catch (error) {
 			debug.error('session', 'Error preloading session data:', error);
 		} finally {
@@ -199,14 +141,25 @@
 		preloadSessionData();
 	});
 
-	// Reload session data when sessions change
+	// Reload session data when new sessions arrive
 	$effect(() => {
 		if (sessions.length > 0 && !loadingSessionData) {
-			// Check if there are sessions without cached data
-			const uncachedSessions = sessions.filter(s => !sessionDataCache[s.id]);
-			if (uncachedSessions.length > 0) {
-				debug.log('session', `Found ${uncachedSessions.length} uncached sessions, loading...`);
-				preloadSessionData();
+			const uncachedIds = sessions.filter(s => !sessionDataCache[s.id]).map(s => s.id);
+			if (uncachedIds.length > 0) {
+				debug.log('session', `Found ${uncachedIds.length} uncached sessions, loading...`);
+				ws.http('sessions:preview', { session_ids: uncachedIds }).then((previews: any[]) => {
+					for (const preview of previews) {
+						sessionDataCache[preview.session_id] = {
+							title: preview.title,
+							summary: preview.summary,
+							count: preview.count,
+							userCount: preview.userCount,
+							assistantCount: preview.assistantCount
+						};
+					}
+				}).catch((err: unknown) => {
+					debug.error('session', 'Error loading uncached sessions:', err);
+				});
 			}
 		}
 	});

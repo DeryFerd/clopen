@@ -43,6 +43,48 @@ export const messageQueries = {
 	},
 
 	/**
+	 * Get minimal preview data for a session: first user msg, last assistant msg, and counts.
+	 * Used by the Sessions/History modal to avoid loading all messages.
+	 */
+	getSessionPreview(sessionId: string): {
+		firstUserMessage: DatabaseMessage | null;
+		lastAssistantMessage: DatabaseMessage | null;
+		userCount: number;
+		assistantCount: number;
+	} {
+		const db = getDatabase();
+
+		const firstUserMessage = db.prepare(`
+			SELECT * FROM messages
+			WHERE session_id = ? AND json_extract(sdk_message, '$.type') = 'user'
+			ORDER BY timestamp ASC
+			LIMIT 1
+		`).get(sessionId) as DatabaseMessage | null;
+
+		const lastAssistantMessage = db.prepare(`
+			SELECT * FROM messages
+			WHERE session_id = ? AND json_extract(sdk_message, '$.type') = 'assistant'
+			ORDER BY timestamp DESC
+			LIMIT 1
+		`).get(sessionId) as DatabaseMessage | null;
+
+		const counts = db.prepare(`
+			SELECT
+				SUM(CASE WHEN json_extract(sdk_message, '$.type') = 'user' THEN 1 ELSE 0 END) AS user_count,
+				SUM(CASE WHEN json_extract(sdk_message, '$.type') = 'assistant' THEN 1 ELSE 0 END) AS assistant_count
+			FROM messages
+			WHERE session_id = ?
+		`).get(sessionId) as { user_count: number; assistant_count: number } | null;
+
+		return {
+			firstUserMessage,
+			lastAssistantMessage,
+			userCount: counts?.user_count ?? 0,
+			assistantCount: counts?.assistant_count ?? 0
+		};
+	},
+
+	/**
 	 * Get all messages for a session including deleted ones (for timeline view)
 	 */
 	getAllBySessionId(sessionId: string): DatabaseMessage[] {

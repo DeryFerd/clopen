@@ -20,7 +20,6 @@ import { loggerMiddleware } from './middleware/logger';
 import { initializeDatabase, closeDatabase } from './database';
 import { disposeAllEngines } from './engine';
 import { debug } from '$shared/utils/logger';
-import { findAvailablePort } from './utils/port-utils';
 import { networkInterfaces } from 'os';
 import { resolve } from 'node:path';
 import { statSync } from 'node:fs';
@@ -117,11 +116,12 @@ if (!isDevelopment) {
 
 // Start server with proper initialization sequence
 async function startServer() {
-	// Find available port — auto-increment if desired port is in use
-	const actualPort = await findAvailablePort(PORT);
-	if (actualPort !== PORT) {
-		debug.log('server', `⚠️ Port ${PORT} in use, using ${actualPort} instead`);
-	}
+	// Port resolution is handled by the caller:
+	// - Development: scripts/dev.ts resolves ports and passes via PORT_BACKEND env
+	// - Production:  scripts/start.ts resolves port and passes via PORT env
+	// - CLI:         bin/clopen.ts resolves port and passes via PORT env
+	// This avoids double port-check race conditions (e.g. zombie processes on
+	// Windows causing silent desync between Vite proxy and backend).
 
 	// Initialize database first before accepting connections
 	try {
@@ -133,18 +133,18 @@ async function startServer() {
 
 	// Start listening after database is ready
 	app.listen({
-		port: actualPort,
+		port: PORT,
 		hostname: HOST
 	}, () => {
 		if (isDevelopment) {
 			console.log('🚀 Backend ready — waiting for frontend...');
 		} else {
-			console.log(`🚀 Clopen running at http://localhost:${actualPort}`);
+			console.log(`🚀 Clopen running at http://localhost:${PORT}`);
 		}
 		if (HOST === '0.0.0.0') {
 			const ips = getLocalIps();
 			for (const ip of ips) {
-				console.log(`🌐 Network access: http://${ip}:${actualPort}`);
+				console.log(`🌐 Network access: http://${ip}:${PORT}`);
 			}
 		}
 	});

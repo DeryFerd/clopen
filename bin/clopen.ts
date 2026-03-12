@@ -367,12 +367,12 @@ async function startServer(options: CLIOptions) {
 	updateLoading('Starting server...');
 	await delay();
 
-	// Run server as subprocess to ensure it uses local node_modules
-	const serverPath = join(__dirname, 'backend/index.ts');
+	// Delegate to scripts/start.ts — handles port resolution (IPv4 + IPv6
+	// zombie detection) and starts backend in a single consistent path.
+	const startScript = join(__dirname, 'scripts/start.ts');
 
 	stopLoading();
 
-	// Prepare environment variables
 	const env = { ...process.env };
 	if (options.port) {
 		env.PORT = options.port.toString();
@@ -381,7 +381,7 @@ async function startServer(options: CLIOptions) {
 		env.HOST = options.host;
 	}
 
-	const serverProc = Bun.spawn(['bun', serverPath], {
+	const serverProc = Bun.spawn(['bun', startScript], {
 		cwd: __dirname,
 		stdout: 'inherit',
 		stderr: 'inherit',

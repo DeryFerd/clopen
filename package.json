@@ -49,7 +49,7 @@
     "dev:backend": "bun --watch backend/index.ts",
     "dev:frontend": "bunx vite dev",
     "build": "vite build",
-    "start": "NODE_ENV=production bun backend/index.ts",
+    "start": "bun scripts/start.ts",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

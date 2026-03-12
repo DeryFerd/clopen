@@ -9,11 +9,102 @@
 	import { sessionState } from '$frontend/stores/core/sessions.svelte';
 	import { appState } from '$frontend/stores/core/app.svelte';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
-	import { fade, fly } from 'svelte/transition';
+	import { fly } from 'svelte/transition';
 	import type { TodoWriteToolInput } from '$shared/types/messaging';
 
 	let isExpanded = $state(true);
 	let isMinimized = $state(false);
+
+	// Drag & snap state
+	let posY = $state(80);
+	let posX = $state(0);
+	let snapSide = $state<'left' | 'right'>('right');
+	let isDragging = $state(false);
+
+	// Minimized button ref for measuring width at snap time
+	let minimizedBtn = $state<HTMLButtonElement | null>(null);
+
+	// Non-reactive drag tracking
+	let _sx = 0, _sy = 0, _mx = 0, _my = 0, _hasDragged = false;
+
+	function getPanelWidth() {
+		return isExpanded ? 330 : 230;
+	}
+
+	// Always use `left` property so CSS can transition in both directions
+	const panelDisplayLeft = $derived(
+		isDragging ? posX : snapSide === 'right' ? window.innerWidth - getPanelWidth() - 16 : 16
+	);
+
+	const minimizedDisplayLeft = $derived(
+		isDragging
+			? posX
+			: snapSide === 'right'
+				? window.innerWidth - (minimizedBtn?.offsetWidth ?? 90) - 16
+				: 16
+	);
+
+	// --- Main panel drag (from header) ---
+	function startDrag(e: PointerEvent) {
+		if ((e.target as HTMLElement).closest('button')) return;
+		isDragging = true;
+		// Use actual rendered position for accuracy
+		const panel = (e.currentTarget as HTMLElement).parentElement!;
+		const rect = panel.getBoundingClientRect();
+		_sx = rect.left;
+		_sy = rect.top;
+		_mx = e.clientX;
+		_my = e.clientY;
+		posX = _sx;
+		posY = _sy;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+
+	function onDrag(e: PointerEvent) {
+		if (!isDragging) return;
+		posX = _sx + e.clientX - _mx;
+		posY = Math.max(0, Math.min(window.innerHeight - 56, _sy + e.clientY - _my));
+	}
+
+	function endDrag(e: PointerEvent) {
+		if (!isDragging) return;
+		isDragging = false;
+		snapSide = posX + getPanelWidth() / 2 < window.innerWidth / 2 ? 'left' : 'right';
+	}
+
+	// --- Minimized button drag (click = restore, drag = move) ---
+	function startMinimizedDrag(e: PointerEvent) {
+		isDragging = true;
+		_hasDragged = false;
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		_sx = rect.left;
+		_sy = rect.top;
+		_mx = e.clientX;
+		_my = e.clientY;
+		posX = _sx;
+		posY = _sy;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+
+	function onMinimizedDrag(e: PointerEvent) {
+		if (!isDragging) return;
+		const dx = e.clientX - _mx;
+		const dy = e.clientY - _my;
+		if (Math.abs(dx) > 5 || Math.abs(dy) > 5) _hasDragged = true;
+		posX = _sx + dx;
+		posY = Math.max(0, Math.min(window.innerHeight - 56, _sy + dy));
+	}
+
+	function endMinimizedDrag(e: PointerEvent) {
+		if (!isDragging) return;
+		isDragging = false;
+		if (!_hasDragged) {
+			restore();
+			return;
+		}
+		const el = e.currentTarget as HTMLElement;
+		snapSide = posX + el.offsetWidth / 2 < window.innerWidth / 2 ? 'left' : 'right';
+	}
 
 	// Extract the latest TodoWrite data from messages
 	const latestTodos = $derived.by(() => {
@@ -104,11 +195,22 @@
 
 {#if shouldShow && !appState.isRestoring}
 	{#if isMinimized}
-		<!-- Minimized state - small floating button -->
+		<!-- Minimized state - small floating button, draggable -->
 		<button
-			onclick={restore}
-			class="fixed top-20 right-4 z-30 bg-violet-600 hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600 text-white rounded-full p-3 shadow-lg transition-all duration-200 flex items-center gap-2"
-			transition:fly={{ x: 100, duration: 200 }}
+			bind:this={minimizedBtn}
+			onpointerdown={startMinimizedDrag}
+			onpointermove={onMinimizedDrag}
+			onpointerup={endMinimizedDrag}
+			onpointercancel={endMinimizedDrag}
+			class="fixed z-30 bg-violet-600 hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600 text-white rounded-full p-3 shadow-lg flex items-center gap-2"
+			style="
+				top: {posY}px;
+				left: {minimizedDisplayLeft}px;
+				touch-action: none;
+				cursor: {isDragging ? 'grabbing' : 'grab'};
+				transition: {isDragging ? 'none' : 'left 0.25s ease, top 0.15s ease'};
+			"
+			transition:fly={{ x: snapSide === 'right' ? 100 : -100, duration: 200 }}
 		>
 			<Icon name="lucide:list-todo" class="w-5 h-5" />
 			<span class="text-sm font-medium">{progress.completed}/{progress.total}</span>
@@ -116,13 +218,25 @@
 	{:else}
 		<!-- Floating panel -->
 		<div
-			class="fixed top-20 right-4 z-30 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden transition-all duration-300"
-			style="width: {isExpanded ? '330px' : '230px'}; max-height: {isExpanded ? '600px' : '56px'}"
-			transition:fly={{ x: 100, duration: 300 }}
+			class="fixed z-30 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden"
+			style="
+				top: {posY}px;
+				left: {panelDisplayLeft}px;
+				width: {isExpanded ? '330px' : '230px'};
+				max-height: {isExpanded ? '600px' : '56px'};
+				transition: {isDragging ? 'none' : 'left 0.25s ease, top 0.15s ease, width 0.3s, max-height 0.3s'};
+			"
+			transition:fly={{ x: snapSide === 'right' ? 100 : -100, duration: 300 }}
 		>
-			<!-- Header -->
+			<!-- Header (drag handle) -->
 			<div
 				class="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-50 to-violet-50 dark:from-slate-800 dark:to-slate-800 border-b border-slate-200 dark:border-slate-700"
+				style="touch-action: none; cursor: {isDragging ? 'grabbing' : 'grab'};"
+				onpointerdown={startDrag}
+				onpointermove={onDrag}
+				onpointerup={endDrag}
+				onpointercancel={endDrag}
+				role="none"
 			>
 				<div class="flex items-center gap-3">
 					<Icon name="lucide:list-todo" class="w-5 h-5 text-violet-600 dark:text-violet-400" />

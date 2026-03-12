@@ -7,22 +7,21 @@
  * stream concurrently.
  */
 
-import { homedir } from 'os';
 import { join } from 'path';
 import { isWindows, findGitBash } from '../../../terminal/shell-utils.js';
 import { engineQueries } from '../../../database/queries';
 import { debug } from '$shared/utils/logger';
-import { getCleanSpawnEnv } from '../../../utils/env';
+import { getCleanSpawnEnv, getClopenDir } from '../../../utils/index.js';
 
 let _ready = false;
 let _initPromise: Promise<void> | null = null;
 let _envOverrides: Record<string, string> = {};
 
 /**
- * Returns the isolated Claude config directory under ~/.clopen/claude/user/
+ * Returns the isolated Claude config directory under {clopenDir}/claude/user/
  */
 export function getClaudeUserConfigDir(): string {
-  return join(homedir(), '.clopen', 'claude', 'user');
+  return join(getClopenDir(), 'claude', 'user');
 }
 
 /**

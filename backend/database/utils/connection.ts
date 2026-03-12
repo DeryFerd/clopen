@@ -1,17 +1,17 @@
 import { join } from 'path';
-import { homedir } from 'os';
 import { Database } from 'bun:sqlite';
 import type { DatabaseConnection } from '$shared/types/database/connection';
 
 import { debug } from '$shared/utils/logger';
+import { getClopenDir } from '../../utils/index.js';
+
 export class DatabaseManager {
 	private static instance: DatabaseManager | null = null;
 	private db: DatabaseConnection | null = null;
 	private readonly dbPath: string;
 
 	private constructor() {
-		const clopenDir = join(homedir(), '.clopen');
-		this.dbPath = join(clopenDir, 'app.db');
+		this.dbPath = join(getClopenDir(), 'app.db');
 	}
 
 	static getInstance(): DatabaseManager {
@@ -29,8 +29,8 @@ export class DatabaseManager {
 		debug.log('database', '🔗 Connecting to database...');
 
 		try {
-			// Create ~/.clopen directory if it doesn't exist
-			const clopenDir = join(homedir(), '.clopen');
+			// Create clopen directory if it doesn't exist
+			const clopenDir = getClopenDir();
 			const dirFile = Bun.file(clopenDir);
 
 			// Check if directory exists, if not create it

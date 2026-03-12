@@ -15,6 +15,7 @@ interface UpdateState {
 	updating: boolean;
 	dismissed: boolean;
 	error: string | null;
+	errorType: 'check' | 'update' | null;
 	updateOutput: string | null;
 	updateSuccess: boolean;
 }
@@ -27,6 +28,7 @@ export const updateState = $state<UpdateState>({
 	updating: false,
 	dismissed: false,
 	error: null,
+	errorType: null,
 	updateOutput: null,
 	updateSuccess: false
 });
@@ -39,6 +41,7 @@ export async function checkForUpdate(): Promise<void> {
 
 	updateState.checking = true;
 	updateState.error = null;
+	updateState.errorType = null;
 
 	try {
 		const result = await ws.http('system:check-update', {});
@@ -53,6 +56,7 @@ export async function checkForUpdate(): Promise<void> {
 		}
 	} catch (err) {
 		updateState.error = err instanceof Error ? err.message : 'Failed to check for updates';
+		updateState.errorType = 'check';
 		debug.error('server', 'Update check failed:', err);
 	} finally {
 		updateState.checking = false;
@@ -65,6 +69,7 @@ export async function runUpdate(): Promise<void> {
 
 	updateState.updating = true;
 	updateState.error = null;
+	updateState.errorType = null;
 	updateState.updateOutput = null;
 
 	try {
@@ -77,6 +82,7 @@ export async function runUpdate(): Promise<void> {
 		debug.log('server', 'Update completed successfully');
 	} catch (err) {
 		updateState.error = err instanceof Error ? err.message : 'Update failed';
+		updateState.errorType = 'update';
 		debug.error('server', 'Update failed:', err);
 	} finally {
 		updateState.updating = false;

@@ -49,12 +49,12 @@
 			<span>Updated to v{updateState.latestVersion} — restart clopen to apply</span>
 		{:else if updateState.error}
 			<Icon name="lucide:package-x" class="w-4 h-4" />
-			<span>Update failed</span>
+			<span>{updateState.errorType === 'check' ? 'Unable to check for updates' : 'Update failed'}</span>
 			<button
 				onclick={handleRetry}
 				class="ml-1 px-2 py-0.5 text-xs font-semibold rounded bg-white/20 hover:bg-white/30 transition-colors"
 			>
-				Retry
+				{updateState.errorType === 'check' ? 'Check again' : 'Retry'}
 			</button>
 			<button
 				onclick={handleDismiss}

@@ -100,14 +100,41 @@
 		authModeLoading = true;
 
 		try {
-			if (selectedAuthMode === 'none') {
-				await authStore.setupNoAuth();
-				completedSteps.add('auth-mode');
-				completedSteps.add('admin-account');
-				completedSteps = new Set(completedSteps);
-				currentStep = 'engines';
+			if (!isExistingUser) {
+				// Fresh setup — existing behavior
+				if (selectedAuthMode === 'none') {
+					await authStore.setupNoAuth();
+					completedSteps.add('auth-mode');
+					completedSteps.add('admin-account');
+					completedSteps = new Set(completedSteps);
+					currentStep = 'engines';
+				} else {
+					goToNextStep();
+				}
 			} else {
-				goToNextStep();
+				// Returning user (wizard shown again after refresh) — apply selected mode
+				const previousMode = authStore.authMode;
+				if (selectedAuthMode === 'none' && previousMode !== 'none') {
+					// with-auth → no-auth: update mode, skip admin-account
+					await authStore.switchToNoAuth();
+					completedSteps.add('auth-mode');
+					completedSteps.add('admin-account');
+					completedSteps = new Set(completedSteps);
+					currentStep = 'engines';
+				} else if (selectedAuthMode === 'required' && previousMode !== 'required') {
+					// no-auth → with-auth: update mode, regenerate PAT, go to admin-account
+					await authStore.switchToWithAuth();
+					goToNextStep();
+				} else if (selectedAuthMode === 'none') {
+					// Same mode (none) — skip admin-account, go to engines
+					completedSteps.add('auth-mode');
+					completedSteps.add('admin-account');
+					completedSteps = new Set(completedSteps);
+					currentStep = 'engines';
+				} else {
+					// Same mode (required) — advance to admin-account
+					goToNextStep();
+				}
 			}
 		} catch (err) {
 			authModeError = err instanceof Error ? err.message : 'Setup failed';
@@ -133,11 +160,16 @@
 		adminLoading = true;
 		try {
 			if (isExistingUser) {
-				// Existing user — just update name if changed and proceed
+				// Existing user — update name if changed
 				if (adminName.trim() !== existingUserName) {
 					await authStore.updateName(adminName.trim());
 				}
-				goToNextStep();
+				// If a PAT was just generated (e.g. switched from no-auth to with-auth), show it
+				if (authStore.personalAccessToken) {
+					showPAT = true;
+				} else {
+					goToNextStep();
+				}
 			} else {
 				await authStore.setup(adminName.trim());
 				showPAT = true;

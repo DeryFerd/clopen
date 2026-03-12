@@ -22,6 +22,10 @@ bun install
 bun run check
 ```
 
+### Data Directory
+
+When running `bun run dev`, Clopen stores data in `~/.clopen-dev` instead of `~/.clopen`. This keeps development data separate from any production instance — especially important since Clopen can be used to develop itself.
+
 ### Keep Updated
 
 ```bash

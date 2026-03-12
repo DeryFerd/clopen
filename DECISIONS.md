@@ -72,7 +72,7 @@
 
 ---
 
-### 8a. Claude Agent SDK for Claude Engine
+### 9. Claude Agent SDK for Claude Engine
 
 **Decision:** Claude Agent SDK inside the Claude Code engine adapter
 **Rationale:** Official Anthropic SDK with built-in streaming, tool use handling, session management, and type-safe TypeScript API.
@@ -80,7 +80,7 @@
 
 ---
 
-### 9. bun-pty for Terminal
+### 10. bun-pty for Terminal
 
 **Decision:** bun-pty instead of node-pty
 **Rationale:** Native Bun implementation, full PTY emulation, cross-platform (Windows/macOS/Linux), maintained for Bun ecosystem.
@@ -90,7 +90,7 @@
 
 ## Features
 
-### 10. Built-in Git Management
+### 11. Built-in Git Management
 
 **Decision:** Full source control using native git CLI subprocess instead of a library
 **Rationale:** Direct git calls are always in sync with actual repo state, no extra dependencies, supports the full range of operations needed.
@@ -98,15 +98,15 @@
 
 ---
 
-### 11. Multi-Account Claude Code
+### 12. Multi-Account Claude Code
 
 **Decision:** Store multiple Claude Code OAuth tokens in SQLite, support per-session account switching
-**Rationale:** Developers need multiple accounts (personal/work/team). Tokens injected via `CLAUDE_CODE_OAUTH_TOKEN` env override, isolated under `~/.clopen/claude/user/` without touching system-level Claude config.
+**Rationale:** Developers need multiple accounts (personal/work/team). Tokens injected via `CLAUDE_CODE_OAUTH_TOKEN` env override, isolated under `{clopenDir}/claude/user/` without touching system-level Claude config. `clopenDir` is `~/.clopen-dev` in development, `~/.clopen` in production.
 **Trade-offs:** OAuth tokens stored in plaintext locally, no automated login flow yet.
 
 ---
 
-### 12. OpenCode via SDK Server
+### 13. OpenCode via SDK Server
 
 **Decision:** Run OpenCode as a background server, communicate via `@opencode-ai/sdk`
 **Rationale:** Keeps integration clean and swappable within the adapter pattern, messages normalized to Claude SDK format so stream manager is unchanged.
@@ -114,7 +114,7 @@
 
 ---
 
-### 13. Git-Like Commit Graph for Checkpoints
+### 14. Git-Like Commit Graph for Checkpoints
 
 **Decision:** Git-like commit graph (parent-child messages, HEAD pointer, branches table) instead of soft-delete
 **Rationale:** Parent-child relationships are more reliable than timestamp ordering. HEAD pointer provides clear current position. Graph structure handles branching naturally with the same mental model as git.
@@ -122,9 +122,9 @@
 
 ---
 
-### 14. File Snapshot System
+### 15. File Snapshot System
 
-**Decision:** Content-addressable blob storage on filesystem (`~/.clopen/snapshots/`) with lightweight DB metadata, not storing file content in the database
+**Decision:** Content-addressable blob storage on filesystem (`{clopenDir}/snapshots/`) with lightweight DB metadata, not storing file content in the database
 **Rationale:** Git-inspired design — blobs stored as gzip-compressed files keyed by SHA-256 hash with 2-char prefix subdirectories, identical content deduplicated automatically. Tree files map filepath → blob hash per snapshot. DB stores only metadata and delta stats (no file content). mtime cache avoids re-reading unchanged files. Supports binary files safely via Buffer throughout.
 **Trade-offs:** Increased filesystem usage over time, legacy two-format support adds restoration complexity.
 
@@ -132,7 +132,7 @@
 
 ## Browser Preview
 
-### 15. Puppeteer for Browser Automation
+### 16. Puppeteer for Browser Automation
 
 **Decision:** Puppeteer instead of Playwright or Selenium
 **Rationale:** Excellent Chrome DevTools Protocol (CDP) integration, rich control API, native screenshot and video capture, official Chrome/Chromium automation tool.
@@ -140,7 +140,7 @@
 
 ---
 
-### 16. WebCodecs Video Encoding
+### 17. WebCodecs Video Encoding
 
 **Decision:** WebCodecs-based video encoding in Chromium instead of JPEG sequence streaming
 **Rationale:** JPEG at 24fps uses ~720KB/s. WebCodecs offloads encoding to Chromium (hardware-accelerated), server only forwards binary chunks — 80-90% bandwidth reduction.
@@ -148,7 +148,7 @@
 
 ---
 
-### 17. Modern Browsers Only
+### 18. Modern Browsers Only
 
 **Decision:** No backward compatibility, target modern browsers only
 **Rationale:** Clean codebase, modern APIs without polyfills, target audience uses modern development tools.
@@ -158,7 +158,7 @@
 
 ## Authentication & Collaboration
 
-### 18. Flexible Authentication (No-Auth + Multi-User)
+### 19. Flexible Authentication (No-Auth + Multi-User)
 
 **Decision:** Dual authentication mode — No Login or With Login (token-based) — configurable during setup wizard and togglable in Settings > Security
 **Rationale:** Not all deployments need authentication. Personal/local use should be frictionless (No Login), while team/production deployments need access control (With Login). The system stores `authMode` in `system:settings` (`'none'` or `'required'`). In No Login mode, a default admin user is auto-created and all WS routes bypass authentication checks. Existing users and sessions are preserved when switching modes (bypassed, not deleted). Switching from No Login to With Login generates a PAT for the existing admin. Three token types remain for With Login: session (`clp_ses_*`, 30-day, auto-reconnect), PAT (`clp_pat_*`, permanent, cross-device login), invite (`clp_inv_*`, single-use). Rate limiting, admin-only routes, and CLI `clopen reset-pat` recovery all apply in With Login mode.
@@ -166,7 +166,7 @@
 
 ---
 
-### 19. Real-Time Presence Tracking
+### 20. Real-Time Presence Tracking
 
 **Decision:** WebSocket-based presence tracking per project
 **Rationale:** Show active collaborators, enable awareness in shared sessions, foundation for future cursor sharing.
@@ -176,7 +176,7 @@
 
 ## Infrastructure
 
-### 20. Cloudflare Tunnel Built-In
+### 21. Cloudflare Tunnel Built-In
 
 **Decision:** Built-in Cloudflare Tunnel support
 **Rationale:** One-click public URL with HTTPS, no port forwarding needed, works across networks and firewalls, QR code for mobile access.
@@ -184,7 +184,7 @@
 
 ---
 
-### 21. Multi-Project Support
+### 22. Multi-Project Support
 
 **Decision:** Multiple independent projects with separate contexts
 **Rationale:** Users work on multiple projects simultaneously, each with its own chat history, settings, and WebSocket room.
@@ -194,7 +194,7 @@
 
 ## Tooling
 
-### 22. Custom Logger (`debug` module)
+### 23. Custom Logger (`debug` module)
 
 **Decision:** Custom `debug` module to replace console.*, with label-based filtering
 **Rationale:** Structured logging with 22 label categories, runtime filtering, production-ready without code changes. Named `debug` to avoid `$` prefix conflict in Svelte.
@@ -202,7 +202,7 @@
 
 ---
 
-### 23. Port 9141, No Fallback
+### 24. Port 9141, No Fallback
 
 **Decision:** Fixed port 9141 with hard failure if occupied
 **Rationale:** Predictable, consistent port for all users and documentation. No complex discovery logic.
@@ -210,7 +210,7 @@
 
 ---
 
-### 24. ESLint Only, No Prettier
+### 25. ESLint Only, No Prettier
 
 **Decision:** Remove Prettier, use ESLint + svelte-check only
 **Rationale:** Prettier conflicts with ESLint and svelte-check on formatting. Two-tool strategy: `bun run check` for types/Svelte compiler, `bun run lint` for bug patterns. Disabled in `.vscode/settings.json` to prevent accidental reformats.
@@ -218,7 +218,7 @@
 
 ---
 
-### 25. Modular Preview Folder Structure
+### 26. Modular Preview Folder Structure
 
 **Decision:** Platform-based folder structure (`browser/`, `shared/`) for the preview system
 **Rationale:** Isolates platform-specific code, easy to add Android/iOS/Desktop preview in the future.
@@ -226,7 +226,15 @@
 
 ---
 
-### 26. Path Normalization for MCP Cross-Platform
+### 27. Data Directory Separation by Environment
+
+**Decision:** Development instances use `~/.clopen-dev`, production uses `~/.clopen`, resolved via `getClopenDir()` in `backend/utils/paths.ts`
+**Rationale:** Clopen can be used to develop itself. Without separation, dev and production instances on the same machine share the same SQLite database, blob store, and Claude config — causing data corruption and confusion.
+**Trade-offs:** None.
+
+---
+
+### 28. Path Normalization for MCP Cross-Platform
 
 **Decision:** Generate multiple path variations for Claude Code config lookup
 **Rationale:** Claude Code stores configs with different formats (Windows `C:\`, Unix `/c/`). Case-insensitive matching ensures MCP servers are found regardless of path format.
@@ -234,7 +242,7 @@
 
 ---
 
-### 27. Multi-Step Setup Wizard
+### 29. Multi-Step Setup Wizard
 
 **Decision:** Replace single-page admin setup with a multi-step wizard (auth mode → admin account → AI engines → preferences)
 **Rationale:** First-time setup involves multiple concerns — authentication strategy, account creation, engine availability, and appearance preferences. A step-by-step wizard reduces cognitive load and lets users skip optional steps (engines, preferences) while ensuring critical decisions (auth mode) are made upfront. The stepper UI shows progress and allows navigation back to completed steps.

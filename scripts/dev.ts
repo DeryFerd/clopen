@@ -33,6 +33,7 @@ console.log(`Frontend: http://localhost:${frontendPort}`);
 console.log();
 
 const portEnv = {
+	NODE_ENV: 'development',
 	PORT_BACKEND: String(backendPort),
 	PORT_FRONTEND: String(frontendPort),
 };

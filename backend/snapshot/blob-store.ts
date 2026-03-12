@@ -11,12 +11,12 @@
  */
 
 import { join } from 'path';
-import { homedir } from 'os';
 import fs from 'fs/promises';
 import { gzipSync, gunzipSync } from 'zlib';
 import { debug } from '$shared/utils/logger';
+import { getClopenDir } from '../utils/index.js';
 
-const SNAPSHOTS_DIR = join(homedir(), '.clopen', 'snapshots');
+const SNAPSHOTS_DIR = join(getClopenDir(), 'snapshots');
 const BLOBS_DIR = join(SNAPSHOTS_DIR, 'blobs');
 const TREES_DIR = join(SNAPSHOTS_DIR, 'trees');
 

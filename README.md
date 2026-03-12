@@ -9,7 +9,7 @@
 
 ## Features
 
-- **Multi-Account Claude Code** - Manage multiple accounts (personal, work, team) and switch instantly per session, isolated under `~/.clopen/claude/user/` without touching system-level Claude config
+- **Multi-Account Claude Code** - Manage multiple accounts (personal, work, team) and switch instantly per session, isolated under `~/.clopen/claude/user/` (or `~/.clopen-dev/` in development) without touching system-level Claude config
 - **Multi-Engine Support** - Switch between Claude Code and OpenCode
 - **AI Chat Interface** - Streaming responses with tool use visualization
 - **Background Processing** - Chat, terminal, and other processes continue running even when you close the browser — come back later and pick up where you left off
@@ -91,6 +91,8 @@ bun install
 bun run dev     # Start development server
 bun run check   # Type checking
 ```
+
+When running in development mode, Clopen uses `~/.clopen-dev` instead of `~/.clopen`, keeping dev data separate from any production instance.
 
 ---
 

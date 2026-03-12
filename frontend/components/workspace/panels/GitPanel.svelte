@@ -129,6 +129,8 @@
 	// Container width for responsive layout (same threshold as Files: 800)
 	let containerRef = $state<HTMLDivElement | null>(null);
 	let containerWidth = $state(0);
+	let leftPanelWidth = $state(288); // default w-72
+	let isResizing = $state(false);
 	const TWO_COLUMN_THRESHOLD = $derived(Math.round(600 * (settings.fontSize / 13)));
 	const isTwoColumnMode = $derived(containerWidth >= TWO_COLUMN_THRESHOLD);
 
@@ -1025,6 +1027,26 @@
 		return () => unsub();
 	});
 
+	function startColumnResize(e: MouseEvent) {
+		isResizing = true;
+		const startX = e.clientX;
+		const startWidth = leftPanelWidth;
+
+		function onMouseMove(e: MouseEvent) {
+			const delta = e.clientX - startX;
+			leftPanelWidth = Math.max(120, Math.min(startWidth + delta, containerWidth - 120));
+		}
+
+		function onMouseUp() {
+			isResizing = false;
+			window.removeEventListener('mousemove', onMouseMove);
+			window.removeEventListener('mouseup', onMouseUp);
+		}
+
+		window.addEventListener('mousemove', onMouseMove);
+		window.addEventListener('mouseup', onMouseUp);
+	}
+
 	// Monitor container width
 	onMount(() => {
 		let resizeObserver: ResizeObserver | null = null;
@@ -1442,18 +1464,34 @@
 	{:else}
 		<div class="flex-1 overflow-hidden">
 			<!-- Unified layout: always render both panels to preserve state (like Files panel) -->
-			<div class="h-full flex">
+			<div class="h-full flex" class:select-none={isResizing} class:cursor-col-resize={isResizing}>
 				<!-- Left panel: Changes list -->
 				<div
 					class={isTwoColumnMode
-						? 'w-72 flex-shrink-0 h-full overflow-hidden border-r border-slate-200 dark:border-slate-700 flex flex-col'
+						? 'flex-shrink-0 h-full overflow-hidden flex flex-col'
 						: (viewMode === 'list' ? 'w-full h-full overflow-hidden flex flex-col' : 'hidden')}
+					style={isTwoColumnMode ? `width: ${leftPanelWidth}px` : undefined}
 				>
 					{@render viewTabBar()}
 					{@render changesList()}
 				</div>
 
-				<!-- Right panel: Diff viewer -->
+				{#if isTwoColumnMode}
+				<!-- Column resize handle -->
+				<div
+					class="relative flex-shrink-0 h-full w-px cursor-col-resize group"
+					role="separator"
+					aria-orientation="vertical"
+					onmousedown={startColumnResize}
+				>
+					<!-- Invisible extended hit area (6px each side) -->
+					<div class="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize z-10"></div>
+					<!-- Visual line: 1px default, expands to 4px on hover -->
+					<div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px group-hover:w-1 bg-slate-200 dark:bg-slate-700 group-hover:bg-blue-400 dark:group-hover:bg-blue-500 transition-all duration-150"></div>
+				</div>
+			{/if}
+
+			<!-- Right panel: Diff viewer -->
 				<div
 					class={isTwoColumnMode
 						? 'flex-1 h-full overflow-hidden flex flex-col'

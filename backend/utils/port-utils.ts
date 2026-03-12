@@ -1,14 +1,18 @@
 /**
  * Port utilities for checking ports before server start.
  * Bun-optimized: uses Bun.connect for fast cross-platform port check.
+ *
+ * Checks BOTH IPv4 (127.0.0.1) and IPv6 (::1) — on Windows, 'localhost'
+ * may resolve to either address. A zombie process listening on [::1] would
+ * go undetected by an IPv4-only check, causing the new server to bind to a
+ * port that can't actually serve traffic (connections hang indefinitely).
  */
 
-/** Check if a port is currently in use */
-export async function isPortInUse(port: number): Promise<boolean> {
+/** Try to connect to a specific host:port */
+async function tryConnect(hostname: string, port: number): Promise<boolean> {
 	try {
-		// Bun-native TCP connect — fast cross-platform check
 		const socket = await Bun.connect({
-			hostname: '127.0.0.1',
+			hostname,
 			port,
 			socket: {
 				data() {},
@@ -18,10 +22,19 @@ export async function isPortInUse(port: number): Promise<boolean> {
 			}
 		});
 		socket.end();
-		return true; // Connection succeeded = port in use
+		return true;
 	} catch {
-		return false; // Connection refused = port is free
+		return false;
 	}
+}
+
+/** Check if a port is currently in use on any localhost address (IPv4 + IPv6) */
+export async function isPortInUse(port: number): Promise<boolean> {
+	const [v4, v6] = await Promise.all([
+		tryConnect('127.0.0.1', port),
+		tryConnect('::1', port),
+	]);
+	return v4 || v6;
 }
 
 /** Find an available port starting from the given port, incrementing on collision */

@@ -3,8 +3,8 @@
 	import { settings, updateSettings, applyFontSize } from '$frontend/stores/features/settings.svelte';
 	import Icon from '../../common/display/Icon.svelte';
 
-	const FONT_SIZE_MIN = 10;
-	const FONT_SIZE_MAX = 20;
+	const FONT_SIZE_MIN = 8;
+	const FONT_SIZE_MAX = 24;
 
 	function handleFontSizeChange(e: Event) {
 		const value = Number((e.target as HTMLInputElement).value);

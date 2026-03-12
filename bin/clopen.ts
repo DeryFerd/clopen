@@ -88,7 +88,7 @@ const MAX_PORT = 65535;
 
 function showHelp() {
 	console.log(`
-Clopen - Modern web UI for Claude Code
+Clopen - All-in-one web workspace for Claude Code & OpenCode
 
 USAGE:
   clopen [OPTIONS]
@@ -106,7 +106,7 @@ OPTIONS:
 
 EXAMPLES:
   clopen                  # Start with default settings (port ${DEFAULT_PORT})
-  clopen --port 9150      # Start on port 9150
+  clopen --port 9145      # Start on port 9145
   clopen --host 0.0.0.0   # Bind to all network interfaces
   clopen update           # Update to the latest version
   clopen reset-pat        # Regenerate admin login token
@@ -262,8 +262,8 @@ async function recoverAdminToken() {
 	console.log(`\x1b[36mClopen\x1b[0m v${version} — Admin Token Recovery\n`);
 
 	// Initialize database (import dynamically to avoid loading full backend)
-	const { initializeDatabase } = await import('../backend/lib/database/index');
-	const { listUsers, regeneratePAT } = await import('../backend/lib/auth/auth-service');
+	const { initializeDatabase } = await import('../backend/database/index');
+	const { listUsers, regeneratePAT } = await import('../backend/auth/auth-service');
 
 	await initializeDatabase();
 

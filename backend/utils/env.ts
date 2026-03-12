@@ -22,12 +22,12 @@ const isDev = process.env.NODE_ENV !== 'production';
 
 export const SERVER_ENV = {
 	NODE_ENV: (process.env.NODE_ENV || 'development') as string,
-	/** Backend port — dev: PORT_BACKEND (default 9151), prod: PORT (default 9141) */
+	/** Backend port — dev: PORT_BACKEND (default 9161), prod: PORT (default 9141) */
 	PORT: isDev
-		? (process.env.PORT_BACKEND ? parseInt(process.env.PORT_BACKEND) : 9151)
+		? (process.env.PORT_BACKEND ? parseInt(process.env.PORT_BACKEND) : 9161)
 		: (process.env.PORT ? parseInt(process.env.PORT) : 9141),
 	/** Frontend port — only used in dev for Vite proxy coordination */
-	PORT_FRONTEND: process.env.PORT_FRONTEND ? parseInt(process.env.PORT_FRONTEND) : 9141,
+	PORT_FRONTEND: process.env.PORT_FRONTEND ? parseInt(process.env.PORT_FRONTEND) : 9151,
 	HOST: (process.env.HOST || 'localhost') as string,
 	isDevelopment: isDev,
 } as const;

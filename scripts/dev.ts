@@ -9,8 +9,8 @@
 import concurrently from 'concurrently';
 import { findAvailablePort } from '../backend/utils/port-utils';
 
-const desiredBackend = process.env.PORT_BACKEND ? parseInt(process.env.PORT_BACKEND) : 9151;
-const desiredFrontend = process.env.PORT_FRONTEND ? parseInt(process.env.PORT_FRONTEND) : 9141;
+const desiredBackend = process.env.PORT_BACKEND ? parseInt(process.env.PORT_BACKEND) : 9161;
+const desiredFrontend = process.env.PORT_FRONTEND ? parseInt(process.env.PORT_FRONTEND) : 9151;
 
 // Resolve available ports
 const backendPort = await findAvailablePort(desiredBackend);

@@ -123,7 +123,7 @@ Clopen uses an engine-agnostic adapter pattern — both engines normalize output
 ### Port 9141 Already in Use
 
 ```bash
-clopen --port 9150
+clopen --port 9145
 ```
 
 Or kill the existing process:

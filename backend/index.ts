@@ -45,7 +45,7 @@ wsRouter.setAuthMiddleware(async (conn, action) => {
 /**
  * Clopen - Elysia Backend Server
  *
- * Development: Elysia runs on port 9151, Vite dev server proxies /api and /ws from port 9141
+ * Development: Elysia runs on port 9161, Vite dev server proxies /api and /ws from port 9151
  * Production: Elysia runs on port 9141, serves static files from dist/ + API + WebSocket
  */
 

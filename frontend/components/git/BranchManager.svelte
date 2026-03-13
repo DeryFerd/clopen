@@ -35,7 +35,6 @@
 	let showAddRemoteForm = $state(false);
 	let newRemoteName = $state('origin');
 	let newRemoteUrl = $state('');
-	let showRemoteSection = $state(false);
 
 	// Confirm dialog
 	let showConfirmDialog = $state(false);
@@ -168,49 +167,6 @@
 	{/snippet}
 
 	{#snippet children()}
-		<!-- Create branch form -->
-		{#if showCreateForm}
-			<div class="mb-4 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
-				<input
-					type="text"
-					bind:value={newBranchName}
-					placeholder="New branch name..."
-					class="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40"
-					onkeydown={(e) => e.key === 'Enter' && handleCreate()}
-					autofocus
-				/>
-				<div class="flex gap-2">
-					<button
-						type="button"
-						class="flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer border-none
-							{newBranchName.trim()
-								? 'bg-violet-600 text-white hover:bg-violet-700'
-								: 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}"
-						onclick={handleCreate}
-						disabled={!newBranchName.trim()}
-					>
-						Create Branch
-					</button>
-					<button
-						type="button"
-						class="px-3 py-2 text-sm font-medium bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-						onclick={() => { showCreateForm = false; newBranchName = ''; }}
-					>
-						Cancel
-					</button>
-				</div>
-			</div>
-		{:else}
-			<button
-				type="button"
-				class="flex items-center justify-center gap-2 w-full mb-4 py-2.5 px-3 border border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-500 hover:text-violet-600 hover:border-violet-400 transition-colors cursor-pointer bg-transparent"
-				onclick={() => showCreateForm = true}
-			>
-				<Icon name="lucide:plus" class="w-4 h-4" />
-				<span>Create New Branch</span>
-			</button>
-		{/if}
-
 		<!-- Search -->
 		<div class="mb-4">
 			<div class="flex items-center gap-2 py-2.5 px-3.5 bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 rounded-lg">
@@ -242,7 +198,7 @@
 					{activeTab === 'local'
 						? 'bg-violet-500/10 text-violet-600'
 						: 'bg-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}"
-				onclick={() => activeTab = 'local'}
+				onclick={() => { activeTab = 'local'; showCreateForm = false; newBranchName = ''; }}
 			>
 				Local ({filteredLocal.length})
 			</button>
@@ -261,6 +217,49 @@
 		<!-- Branch list -->
 		<div class="space-y-1.5 max-h-80 overflow-y-auto">
 			{#if activeTab === 'local'}
+				<!-- Create branch form (Local tab only) -->
+				{#if showCreateForm}
+					<div class="mb-2 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
+						<input
+							type="text"
+							bind:value={newBranchName}
+							placeholder="New branch name..."
+							class="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40"
+							onkeydown={(e) => e.key === 'Enter' && handleCreate()}
+							autofocus
+						/>
+						<div class="flex gap-2">
+							<button
+								type="button"
+								class="flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer border-none
+									{newBranchName.trim()
+										? 'bg-violet-600 text-white hover:bg-violet-700'
+										: 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}"
+								onclick={handleCreate}
+								disabled={!newBranchName.trim()}
+							>
+								Create Branch
+							</button>
+							<button
+								type="button"
+								class="px-3 py-2 text-sm font-medium bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+								onclick={() => { showCreateForm = false; newBranchName = ''; }}
+							>
+								Cancel
+							</button>
+						</div>
+					</div>
+				{:else}
+					<button
+						type="button"
+						class="flex items-center justify-center gap-2 w-full mb-2 py-2.5 px-3 border border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-500 hover:text-violet-600 hover:border-violet-400 transition-colors cursor-pointer bg-transparent"
+						onclick={() => showCreateForm = true}
+					>
+						<Icon name="lucide:plus" class="w-4 h-4" />
+						<span>Create New Branch</span>
+					</button>
+				{/if}
+
 				{#each filteredLocal as branch (branch.name)}
 					<div
 						class="group flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
@@ -320,129 +319,118 @@
 					</div>
 				{/each}
 			{:else if activeTab === 'remote'}
-				{#each filteredRemote as branch (branch.name)}
-					<div
-						class="group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors border border-slate-200 dark:border-slate-700"
-					>
-						<div class="flex items-center gap-2.5 flex-1 min-w-0">
-							<Icon name="lucide:cloud" class="w-4 h-4 text-slate-400 shrink-0" />
-							<span class="text-sm text-slate-900 dark:text-slate-100 truncate">{branch.name}</span>
-						</div>
+				{#if isLoadingRemotes}
+					<div class="flex items-center justify-center py-8">
+						<div class="w-4 h-4 border-2 border-slate-200 dark:border-slate-700 border-t-violet-600 rounded-full animate-spin"></div>
+					</div>
+				{:else if remotes.length === 0}
+					<div class="flex flex-col items-center gap-2 py-8 text-slate-500 dark:text-slate-400 text-sm">
+						<Icon name="lucide:server-off" class="w-10 h-10 opacity-40" />
+						<p class="font-medium">No remote connections</p>
+						<p class="text-xs text-center opacity-70">Add a remote below to track remote branches</p>
+					</div>
+				{:else}
+					{#each remotes as remote (remote.name)}
+						{@const remoteBranches = filteredRemote.filter(b => b.name.startsWith(remote.name + '/'))}
+						{#if !searchQuery || remoteBranches.length > 0}
+							<div class="space-y-1">
+								<!-- Remote group header -->
+								<div class="group flex items-center gap-2 px-2 py-1.5 rounded-lg">
+									<Icon name="lucide:server" class="w-3.5 h-3.5 text-slate-400 shrink-0" />
+									<span class="text-xs font-semibold text-slate-600 dark:text-slate-300">{remote.name}</span>
+									<span class="text-xs text-slate-400 dark:text-slate-500 font-mono truncate flex-1">{remote.fetchUrl}</span>
+									<button
+										type="button"
+										class="flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors cursor-pointer bg-transparent border-none shrink-0 opacity-0 group-hover:opacity-100"
+										onclick={() => handleRemoveRemote(remote.name)}
+										title="Disconnect remote"
+									>
+										<Icon name="lucide:unlink" class="w-3.5 h-3.5" />
+									</button>
+								</div>
 
-						<div class="items-center gap-1 shrink-0 hidden group-hover:flex">
+								<!-- Branches under this remote -->
+								{#if remoteBranches.length > 0}
+									<div class="ml-5 space-y-1">
+										{#each remoteBranches as branch (branch.name)}
+											<div class="group flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors border border-slate-200 dark:border-slate-700">
+												<Icon name="lucide:git-branch" class="w-3.5 h-3.5 text-slate-400 shrink-0" />
+												<span class="text-sm text-slate-900 dark:text-slate-100 truncate flex-1">
+													{branch.name.substring(remote.name.length + 1)}
+												</span>
+												<button
+													type="button"
+													class="flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:bg-violet-500/10 hover:text-violet-600 transition-colors cursor-pointer bg-transparent border-none shrink-0 opacity-0 group-hover:opacity-100"
+													onclick={() => handleSwitchRemote(branch.name)}
+													title="Checkout remote branch locally"
+												>
+													<Icon name="lucide:arrow-right" class="w-4 h-4" />
+												</button>
+											</div>
+										{/each}
+									</div>
+								{:else if !searchQuery}
+									<p class="ml-7 text-xs text-slate-400 dark:text-slate-500 py-1">No branches — try Fetch</p>
+								{/if}
+							</div>
+						{/if}
+					{/each}
+				{/if}
+			{/if}
+		</div>
+
+		<!-- Add remote (only shown in Remote tab) -->
+		{#if activeTab === 'remote'}
+			<div class="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+				{#if showAddRemoteForm}
+					<div class="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
+						<input
+							type="text"
+							bind:value={newRemoteName}
+							placeholder="Name (e.g. origin)"
+							class="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40"
+						/>
+						<input
+							type="text"
+							bind:value={newRemoteUrl}
+							placeholder="URL (e.g. https://github.com/user/repo.git)"
+							class="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40 font-mono"
+							onkeydown={(e) => e.key === 'Enter' && handleAddRemote()}
+							autofocus
+						/>
+						<div class="flex gap-2">
 							<button
 								type="button"
-								class="flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-violet-500/10 hover:text-violet-600 transition-colors cursor-pointer bg-transparent border-none"
-								onclick={() => handleSwitchRemote(branch.name)}
-								title="Checkout remote branch"
+								class="flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer border-none
+									{newRemoteName.trim() && newRemoteUrl.trim()
+										? 'bg-violet-600 text-white hover:bg-violet-700'
+										: 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}"
+								onclick={handleAddRemote}
+								disabled={!newRemoteName.trim() || !newRemoteUrl.trim()}
 							>
-								<Icon name="lucide:arrow-right" class="w-4 h-4" />
+								Connect
+							</button>
+							<button
+								type="button"
+								class="px-3 py-2 text-sm font-medium bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+								onclick={() => { showAddRemoteForm = false; newRemoteName = 'origin'; newRemoteUrl = ''; }}
+							>
+								Cancel
 							</button>
 						</div>
 					</div>
 				{:else}
-					<div class="flex flex-col items-center gap-2 py-8 text-slate-500 dark:text-slate-400 text-sm">
-						<Icon name="lucide:search-x" class="w-10 h-10 opacity-40" />
-						<p class="font-medium">No remote branches found</p>
-					</div>
-				{/each}
-			{/if}
-		</div>
-
-		<!-- Remote Connections Section -->
-		<div class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-			<button
-				type="button"
-				class="flex items-center gap-2 w-full text-left bg-transparent border-none cursor-pointer px-0 py-1"
-				onclick={() => showRemoteSection = !showRemoteSection}
-			>
-				<Icon name={showRemoteSection ? 'lucide:chevron-down' : 'lucide:chevron-right'} class="w-3.5 h-3.5 text-slate-400" />
-				<Icon name="lucide:server" class="w-3.5 h-3.5 text-slate-500" />
-				<span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-					Remote Servers ({remotes.length})
-				</span>
-			</button>
-
-			{#if showRemoteSection}
-				<div class="mt-2 space-y-2">
-					{#if isLoadingRemotes}
-						<div class="flex items-center justify-center py-4">
-							<div class="w-4 h-4 border-2 border-slate-200 dark:border-slate-700 border-t-violet-600 rounded-full animate-spin"></div>
-						</div>
-					{:else}
-						<!-- Existing remotes -->
-						{#each remotes as remote (remote.name)}
-							<div class="group flex items-center gap-2.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
-								<div class="flex items-center justify-center w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-800">
-									<Icon name="lucide:globe" class="w-3.5 h-3.5 text-slate-500" />
-								</div>
-								<div class="flex-1 min-w-0">
-									<div class="text-sm font-medium text-slate-900 dark:text-slate-100">{remote.name}</div>
-									<div class="text-xs text-slate-500 dark:text-slate-400 truncate font-mono">{remote.fetchUrl}</div>
-								</div>
-								<button
-									type="button"
-									class="flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors cursor-pointer bg-transparent border-none shrink-0 opacity-0 group-hover:opacity-100"
-									onclick={() => handleRemoveRemote(remote.name)}
-									title="Disconnect remote"
-								>
-									<Icon name="lucide:unlink" class="w-3.5 h-3.5" />
-								</button>
-							</div>
-						{/each}
-
-						<!-- Add remote form -->
-						{#if showAddRemoteForm}
-							<div class="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
-								<input
-									type="text"
-									bind:value={newRemoteName}
-									placeholder="Name (e.g. origin)"
-									class="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40"
-								/>
-								<input
-									type="text"
-									bind:value={newRemoteUrl}
-									placeholder="URL (e.g. https://github.com/user/repo.git)"
-									class="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40 font-mono"
-									onkeydown={(e) => e.key === 'Enter' && handleAddRemote()}
-									autofocus
-								/>
-								<div class="flex gap-2">
-									<button
-										type="button"
-										class="flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer border-none
-											{newRemoteName.trim() && newRemoteUrl.trim()
-												? 'bg-violet-600 text-white hover:bg-violet-700'
-												: 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}"
-										onclick={handleAddRemote}
-										disabled={!newRemoteName.trim() || !newRemoteUrl.trim()}
-									>
-										Connect
-									</button>
-									<button
-										type="button"
-										class="px-3 py-2 text-sm font-medium bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-										onclick={() => { showAddRemoteForm = false; newRemoteName = 'origin'; newRemoteUrl = ''; }}
-									>
-										Cancel
-									</button>
-								</div>
-							</div>
-						{:else}
-							<button
-								type="button"
-								class="flex items-center gap-2 w-full px-3 py-2 text-xs text-slate-500 hover:text-violet-600 hover:bg-violet-500/5 rounded-lg transition-colors cursor-pointer bg-transparent border-none"
-								onclick={() => { showAddRemoteForm = true; showRemoteSection = true; }}
-							>
-								<Icon name="lucide:plus" class="w-3.5 h-3.5" />
-								<span>Add Remote Server</span>
-							</button>
-						{/if}
-					{/if}
-				</div>
-			{/if}
-		</div>
+					<button
+						type="button"
+						class="flex items-center gap-2 w-full px-3 py-2 text-xs text-slate-500 hover:text-violet-600 hover:bg-violet-500/5 rounded-lg transition-colors cursor-pointer bg-transparent border-none"
+						onclick={() => showAddRemoteForm = true}
+					>
+						<Icon name="lucide:plus" class="w-3.5 h-3.5" />
+						<span>Add Remote</span>
+					</button>
+				{/if}
+			</div>
+		{/if}
 	{/snippet}
 </Modal>
 

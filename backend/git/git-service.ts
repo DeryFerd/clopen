@@ -317,7 +317,8 @@ export class GitService {
 	}
 
 	async fetch(cwd: string, remote = 'origin'): Promise<string> {
-		const result = await execGit(['fetch', remote, '--prune'], cwd, 60000);
+		// Use explicit refspec to ensure all branches are fetched regardless of clone config
+		const result = await execGit(['fetch', remote, `+refs/heads/*:refs/remotes/${remote}/*`, '--prune'], cwd, 60000);
 		if (result.exitCode !== 0) {
 			throw new Error(`git fetch failed: ${result.stderr}`);
 		}

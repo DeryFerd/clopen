@@ -548,7 +548,7 @@
 				{@const gitRemotes = gitPanelRef?.panelActions?.getRemotes() || []}
 
 				<!-- Remote selector -->
-				{#if hasRemotes}
+				{#if hasRemotes && gitRemotes.length > 1}
 					<div class="relative">
 						<button
 							type="button"
@@ -586,8 +586,6 @@
 							</div>
 						{/if}
 					</div>
-				{:else if gitPanelRef?.panelActions?.getIsRepo()}
-					<span class="text-xs text-slate-400 italic px-1">no remote</span>
 				{/if}
 
 				<!-- Fetch -->

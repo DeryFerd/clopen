@@ -22,7 +22,7 @@ export async function execGit(
 ): Promise<GitExecResult> {
 	debug.log('git', `Executing: git ${args.join(' ')} in ${cwd}`);
 
-	const proc = Bun.spawn(['git', ...args], {
+	const proc = Bun.spawn(['git', '-c', 'safe.directory=*', ...args], {
 		cwd,
 		stdout: 'pipe',
 		stderr: 'pipe',

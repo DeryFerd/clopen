@@ -24,6 +24,30 @@ if (typeof globalThis.Bun === 'undefined') {
 import { existsSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
+function loadEnvFile(envPath: string): Record<string, string> {
+	const result: Record<string, string> = {};
+	try {
+		const content = readFileSync(envPath, 'utf-8');
+		for (const line of content.split('\n')) {
+			let trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith('#')) continue;
+			if (trimmed.startsWith('export ')) trimmed = trimmed.substring(7).trim();
+			const eqIdx = trimmed.indexOf('=');
+			if (eqIdx <= 0) continue;
+			const key = trimmed.substring(0, eqIdx).trim();
+			let value = trimmed.substring(eqIdx + 1).trim();
+			if ((value.startsWith('"') && value.endsWith('"')) ||
+				(value.startsWith("'") && value.endsWith("'"))) {
+				value = value.slice(1, -1);
+			}
+			result[key] = value;
+		}
+	} catch {
+		// .env doesn't exist or can't be read — return empty
+	}
+	return result;
+}
+
 // CLI Options interface
 interface CLIOptions {
 	port?: number;
@@ -373,13 +397,12 @@ async function startServer(options: CLIOptions) {
 
 	stopLoading();
 
-	const env = { ...process.env };
-	if (options.port) {
-		env.PORT = options.port.toString();
-	}
-	if (options.host) {
-		env.HOST = options.host;
-	}
+	// Overlay clopen's own .env on top of process.env to override any
+	// pollution from a .env file in the directory where `clopen` was invoked.
+	// CLI args take highest priority on top of that.
+	const env = { ...process.env, ...loadEnvFile(ENV_FILE) };
+	if (options.port) env.PORT = options.port.toString();
+	if (options.host) env.HOST = options.host;
 
 	const serverProc = Bun.spawn(['bun', startScript], {
 		cwd: __dirname,

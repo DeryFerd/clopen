@@ -9,7 +9,6 @@
 import { findAvailablePort } from '../backend/utils/port-utils';
 
 const desiredPort = process.env.PORT ? parseInt(process.env.PORT) : 9141;
-const host = process.env.HOST || 'localhost';
 
 const port = await findAvailablePort(desiredPort);
 
@@ -17,8 +16,9 @@ if (port !== desiredPort) {
 	console.log(`⚠️ Port ${desiredPort} in use, using ${port}`);
 }
 
-// Set resolved port before importing backend (env.ts reads at import time)
+// Set resolved values before importing backend (env.ts reads at import time)
 process.env.PORT = String(port);
+process.env.HOST = process.env.HOST || 'localhost';
 process.env.NODE_ENV = 'production';
 
 await import('../backend/index.ts');

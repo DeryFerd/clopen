@@ -23,6 +23,7 @@ if (typeof globalThis.Bun === 'undefined') {
 
 import { existsSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { loadEnvFile } from '../backend/utils/env';
 
 // CLI Options interface
 interface CLIOptions {
@@ -373,13 +374,12 @@ async function startServer(options: CLIOptions) {
 
 	stopLoading();
 
-	const env = { ...process.env };
-	if (options.port) {
-		env.PORT = options.port.toString();
-	}
-	if (options.host) {
-		env.HOST = options.host;
-	}
+	// Overlay clopen's own .env on top of process.env to override any
+	// pollution from a .env file in the directory where `clopen` was invoked.
+	// CLI args take highest priority on top of that.
+	const env = { ...process.env, ...loadEnvFile(ENV_FILE) };
+	if (options.port) env.PORT = options.port.toString();
+	if (options.host) env.HOST = options.host;
 
 	const serverProc = Bun.spawn(['bun', startScript], {
 		cwd: __dirname,

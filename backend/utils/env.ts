@@ -35,15 +35,13 @@ export const SERVER_ENV = {
 // ── .env parsing ────────────────────────────────────────────────────
 
 /**
- * Parse .env file into key-value map.
- * Knowing both key AND value lets us compare against process.env
- * to determine if Bun's auto-load is still in effect or if the
- * system/runtime changed the value after loading.
+ * Parse a .env file at the given path into a key-value record.
+ * Returns an empty object if the file doesn't exist or can't be read.
  */
-function parseDotEnv(): Map<string, string> {
-	const entries = new Map<string, string>();
+export function loadEnvFile(envPath: string): Record<string, string> {
+	const result: Record<string, string> = {};
 	try {
-		const content = readFileSync(join(process.cwd(), '.env'), 'utf-8');
+		const content = readFileSync(envPath, 'utf-8');
 		for (const line of content.split('\n')) {
 			let trimmed = line.trim();
 			if (!trimmed || trimmed.startsWith('#')) continue;
@@ -51,22 +49,22 @@ function parseDotEnv(): Map<string, string> {
 			const eqIdx = trimmed.indexOf('=');
 			if (eqIdx <= 0) continue;
 			const key = trimmed.substring(0, eqIdx).trim();
-			// Strip surrounding quotes from value
 			let value = trimmed.substring(eqIdx + 1).trim();
 			if ((value.startsWith('"') && value.endsWith('"')) ||
 				(value.startsWith("'") && value.endsWith("'"))) {
 				value = value.slice(1, -1);
 			}
-			entries.set(key, value);
+			result[key] = value;
 		}
 	} catch {
 		// .env doesn't exist or can't be read
 	}
-	return entries;
+	return result;
 }
 
-// Capture once at import time
-const dotEnv = parseDotEnv();
+// Capture once at import time — read from CWD which is set to the clopen
+// installation directory when spawned via bin/clopen.ts (cwd: __dirname).
+const dotEnv = new Map(Object.entries(loadEnvFile(join(process.cwd(), '.env'))));
 
 // ── Filter definitions ──────────────────────────────────────────────
 

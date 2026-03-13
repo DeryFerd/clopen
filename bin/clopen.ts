@@ -23,30 +23,7 @@ if (typeof globalThis.Bun === 'undefined') {
 
 import { existsSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-
-function loadEnvFile(envPath: string): Record<string, string> {
-	const result: Record<string, string> = {};
-	try {
-		const content = readFileSync(envPath, 'utf-8');
-		for (const line of content.split('\n')) {
-			let trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith('#')) continue;
-			if (trimmed.startsWith('export ')) trimmed = trimmed.substring(7).trim();
-			const eqIdx = trimmed.indexOf('=');
-			if (eqIdx <= 0) continue;
-			const key = trimmed.substring(0, eqIdx).trim();
-			let value = trimmed.substring(eqIdx + 1).trim();
-			if ((value.startsWith('"') && value.endsWith('"')) ||
-				(value.startsWith("'") && value.endsWith("'"))) {
-				value = value.slice(1, -1);
-			}
-			result[key] = value;
-		}
-	} catch {
-		// .env doesn't exist or can't be read — return empty
-	}
-	return result;
-}
+import { loadEnvFile } from '../backend/utils/env';
 
 // CLI Options interface
 interface CLIOptions {

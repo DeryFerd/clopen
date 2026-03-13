@@ -24,7 +24,9 @@
 	import TokenUsageModal from '../modal/TokenUsageModal.svelte';
 	import DebugModal from '../modal/DebugModal.svelte';
 	import Dialog from '$frontend/components/common/overlay/Dialog.svelte';
-	import ws from '$frontend/utils/ws';
+	import ConflictResolutionModal from '$frontend/components/checkpoint/ConflictResolutionModal.svelte';
+	import { snapshotService } from '$frontend/services/snapshot/snapshot.service';
+	import type { RestoreConflict, ConflictResolution } from '$frontend/services/snapshot/snapshot.service';
 
 	const {
 		message,
@@ -38,6 +40,11 @@
 	let showDebugPopup = $state(false);
 	let showTokenUsagePopup = $state(false);
 	let showRestoreConfirm = $state(false);
+
+	// Conflict resolution state
+	let showConflictModal = $state(false);
+	let conflictList = $state<RestoreConflict[]>([]);
+	let processingRestore = $state(false);
 
 	// Format timestamp
 	const formatTime = (timestamp?: string) => {
@@ -268,15 +275,8 @@
 		showDebugPopup = false;
 	}
 
-	// Handle restore button click
+	// Handle restore button click - check conflicts first
 	async function handleRestore() {
-		showRestoreConfirm = true;
-	}
-
-	// Confirm restore action
-	async function confirmRestore() {
-		showRestoreConfirm = false;
-
 		if (!messageId) {
 			addNotification({
 				type: 'error',
@@ -287,16 +287,41 @@
 			return;
 		}
 
-		try {
-			// Send restore request via WebSocket HTTP
-			await ws.http('snapshot:restore', {
-				messageId,
-				sessionId: sessionState.currentSession?.id || ''
-			});
+		const currentSessionId = sessionState.currentSession?.id;
+		if (!currentSessionId) return;
 
-			if (sessionState.currentSession?.id) {
-				await loadMessagesForSession(sessionState.currentSession.id);
+		try {
+			const conflictCheck = await snapshotService.checkConflicts(messageId, currentSessionId);
+
+			if (conflictCheck.hasConflicts) {
+				// Show conflict resolution modal
+				conflictList = conflictCheck.conflicts;
+				showConflictModal = true;
+			} else {
+				// No conflicts - show simple confirmation
+				showRestoreConfirm = true;
 			}
+		} catch (error) {
+			debug.error('chat', 'Error checking conflicts:', error);
+			// Fallback to simple confirmation
+			showRestoreConfirm = true;
+		}
+	}
+
+	// Execute restore with optional conflict resolutions
+	async function executeRestore(resolutions?: ConflictResolution) {
+		if (!messageId || !sessionState.currentSession?.id) return;
+
+		processingRestore = true;
+
+		try {
+			await snapshotService.restore(
+				messageId,
+				sessionState.currentSession.id,
+				resolutions
+			);
+
+			await loadMessagesForSession(sessionState.currentSession.id);
 		} catch (error) {
 			debug.error('chat', 'Restore error:', error);
 			addNotification({
@@ -305,7 +330,20 @@
 				message: error instanceof Error ? error.message : 'Unknown error',
 				duration: 5000
 			});
+		} finally {
+			processingRestore = false;
 		}
+	}
+
+	// Confirm simple restore (no conflicts)
+	async function confirmRestore() {
+		showRestoreConfirm = false;
+		await executeRestore();
+	}
+
+	// Confirm restore with conflict resolutions
+	async function confirmConflictRestore(resolutions: ConflictResolution) {
+		await executeRestore(resolutions);
 	}
 
 	// Handle edit button click
@@ -470,6 +508,16 @@ This will restore your conversation to this point.`}
 	onConfirm={confirmRestore}
 	onClose={() => {
 		showRestoreConfirm = false;
+	}}
+/>
+
+<!-- Conflict Resolution Modal -->
+<ConflictResolutionModal
+	bind:isOpen={showConflictModal}
+	conflicts={conflictList}
+	onConfirm={confirmConflictRestore}
+	onClose={() => {
+		conflictList = [];
 	}}
 />
 

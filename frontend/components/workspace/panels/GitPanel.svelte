@@ -674,7 +674,7 @@
 		isPulling = true;
 		try {
 			const prevBehind = branchInfo?.behind ?? 0;
-			const result = await ws.http('git:pull', { projectId, remote: selectedRemote });
+			const result = await ws.http('git:pull', { projectId, remote: selectedRemote, branch: branchInfo?.current });
 			if (!result.success) {
 				if (result.message.includes('conflict')) {
 					await loadAll();
@@ -704,7 +704,7 @@
 		isPushing = true;
 		try {
 			const prevAhead = branchInfo?.ahead ?? 0;
-			const result = await ws.http('git:push', { projectId, remote: selectedRemote });
+			const result = await ws.http('git:push', { projectId, remote: selectedRemote, branch: branchInfo?.current });
 			if (!result.success) {
 				showError('Push Failed', result.message);
 			} else {
@@ -971,8 +971,14 @@
 		if (changeDebounce) clearTimeout(changeDebounce);
 		changeDebounce = setTimeout(async () => {
 			changeDebounce = null;
-			// Refresh git status
-			await loadStatus();
+			// Refresh git status and branches (branch switch also modifies working tree)
+			const prevBranch = branchInfo?.current;
+			await Promise.all([loadStatus(), loadBranches()]);
+
+			// If branch changed, also refresh remotes
+			if (branchInfo?.current !== prevBranch) {
+				loadRemotes();
+			}
 
 			// Refresh the active diff tab if currently viewing one
 			if (activeTab && !activeTab.isLoading && activeTab.section !== 'commit') {
@@ -1016,8 +1022,9 @@
 		const unsub = ws.on('git:changed', (payload: any) => {
 			if (payload.projectId !== projectId || !isRepo) return;
 			scheduleGitRefresh();
-			// Also refresh branches in case of branch switch/create/delete
+			// Refresh branches and remotes in case of branch switch/create/delete
 			loadBranches();
+			loadRemotes();
 			// Refresh log if it was already loaded (History tab was visited)
 			if (commits.length > 0) {
 				loadLog(true);

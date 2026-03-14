@@ -23,7 +23,7 @@
 	<div class="flex-1 overflow-auto">
 		<div class="space-y-6">
 
-			<!-- Model Configuration -->
+			<!-- AI Model (Assistant + Commit Message) -->
 			<ModelSettings />
 
 			<!-- Appearance Configuration -->

@@ -8,6 +8,7 @@
 
 import { query, type SDKMessage, type EngineSDKMessage, type Options, type Query, type SDKUserMessage } from '$shared/types/messaging';
 import type { PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
+import type { StructuredGenerationOptions } from '../../types';
 import { normalizePath } from './path-utils';
 import { setupEnvironmentOnce, getEngineEnv } from './environment';
 import { handleStreamError } from './error-handler';
@@ -237,5 +238,111 @@ export class ClaudeCodeEngine implements AIEngine {
 
     this.pendingUserAnswers.delete(toolUseId);
     return true;
+  }
+
+  /**
+   * One-shot structured JSON generation.
+   * Uses query() with no tools, outputFormat, and maxTurns: 1.
+   */
+  async generateStructured<T = unknown>(options: StructuredGenerationOptions): Promise<T> {
+    const {
+      prompt,
+      model = 'haiku',
+      schema,
+      projectPath,
+      abortController,
+      claudeAccountId
+    } = options;
+
+    if (!this._isInitialized) {
+      await this.initialize();
+    }
+
+    const controller = abortController || new AbortController();
+    const normalizedPath = normalizePath(projectPath);
+
+    // Optimized for one-shot structured generation:
+    // - tools: [] prevents tool use (no agentic loops)
+    // - persistSession: false skips writing session to disk
+    // - effort: 'low' reduces processing overhead for simple tasks
+    // - thinking disabled removes reasoning overhead
+    // - minimal systemPrompt avoids loading heavy defaults
+    // - no maxTurns: structured output has its own retry limit
+    const sdkOptions: Options = {
+      permissionMode: 'bypassPermissions' as PermissionMode,
+      allowDangerouslySkipPermissions: true,
+      cwd: normalizedPath,
+      env: getEngineEnv(claudeAccountId),
+      systemPrompt: 'You are a structured data generator. Return JSON matching the provided schema.',
+      tools: [],
+      outputFormat: {
+        type: 'json_schema',
+        schema
+      },
+      persistSession: false,
+      effort: 'low',
+      thinking: { type: 'disabled' },
+      ...(model && { model }),
+      abortController: controller
+    };
+
+    // Use plain string prompt — simpler and faster than AsyncIterable
+    const queryInstance = query({
+      prompt,
+      options: sdkOptions
+    });
+
+    let structuredOutput: unknown = null;
+    let resultText = '';
+    let lastError = '';
+
+    try {
+      for await (const message of queryInstance) {
+        debug.log('engine', `[structured] message type=${message.type}, subtype=${'subtype' in message ? message.subtype : 'n/a'}`);
+
+        if (message.type === 'result') {
+          if (message.subtype === 'success') {
+            const result = message as any;
+            structuredOutput = result.structured_output;
+            resultText = result.result || '';
+            debug.log('engine', `[structured] success: structured_output=${!!structuredOutput}, resultLen=${resultText.length}`);
+          } else {
+            const errResult = message as any;
+            lastError = errResult.errors?.join('; ') || '';
+            const subtype = errResult.subtype || '';
+
+            // Map SDK error subtypes to user-friendly messages
+            if (subtype === 'error_max_structured_output_retries') {
+              lastError = 'Failed to generate valid structured output after multiple attempts';
+            } else if (subtype === 'error_max_turns') {
+              lastError = 'Generation exceeded turn limit';
+            } else if (!lastError) {
+              lastError = subtype || 'unknown error';
+            }
+
+            debug.error('engine', `[structured] result error: ${lastError}`);
+          }
+        }
+      }
+    } catch (error) {
+      handleStreamError(error);
+      // handleStreamError swallows AbortError — if we reach here without throw, it was cancelled
+      throw new Error('Generation was cancelled');
+    }
+
+    if (structuredOutput) {
+      return structuredOutput as T;
+    }
+
+    // Fallback: parse the text result as JSON
+    if (resultText) {
+      try {
+        return JSON.parse(resultText) as T;
+      } catch {
+        debug.warn('engine', `[structured] result text is not valid JSON: ${resultText.slice(0, 200)}`);
+      }
+    }
+
+    throw new Error(lastError || 'Claude Code did not return valid structured output');
   }
 }

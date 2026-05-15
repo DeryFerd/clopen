@@ -9,6 +9,7 @@ import type { Project } from '$shared/types/database/schema';
 import { generateSessionToken, generatePAT, generateInviteToken, hashToken, getTokenType } from './tokens';
 import { generateColorFromString, getInitials } from '$backend/utils/user-helpers';
 import { debug } from '$shared/utils/logger';
+import { acquireSetupLock, releaseSetupLock } from './setup-lock';
 
 /** Default session lifetime in days */
 const DEFAULT_SESSION_DAYS = 30;
@@ -154,40 +155,49 @@ export function createOrGetNoAuthAdmin(): AuthResult {
  * Only works when no users exist.
  */
 export function createAdmin(name: string): SetupResult {
-	if (!needsSetup()) {
-		throw new Error('Setup already completed. Admin account exists.');
+	// Acquire setup lock to prevent race conditions
+	if (!acquireSetupLock()) {
+		throw new Error('Setup already in progress');
 	}
 
-	const trimmedName = name.trim();
-	if (trimmedName.length === 0) {
-		throw new Error('Name cannot be empty');
+	try {
+		if (!needsSetup()) {
+			throw new Error('Setup already completed. Admin account exists.');
+		}
+
+		const trimmedName = name.trim();
+		if (trimmedName.length === 0) {
+			throw new Error('Name cannot be empty');
+		}
+
+		const userId = `user-${crypto.randomUUID()}`;
+		const now = new Date().toISOString();
+		const pat = generatePAT();
+		const patHash = hashToken(pat);
+
+		const dbUser = authQueries.createUser({
+			id: userId,
+			name: trimmedName,
+			color: generateColorFromString(trimmedName),
+			avatar: getInitials(trimmedName),
+			role: 'admin',
+			personal_access_token_hash: patHash,
+			created_at: now
+		});
+
+		const { sessionToken, expiresAt } = createSessionForUser(userId);
+
+		debug.log('auth', `Admin account created: ${trimmedName} (${userId})`);
+
+		return {
+			user: toAuthUser(dbUser),
+			sessionToken,
+			expiresAt,
+			personalAccessToken: pat
+		};
+	} finally {
+		releaseSetupLock();
 	}
-
-	const userId = `user-${crypto.randomUUID()}`;
-	const now = new Date().toISOString();
-	const pat = generatePAT();
-	const patHash = hashToken(pat);
-
-	const dbUser = authQueries.createUser({
-		id: userId,
-		name: trimmedName,
-		color: generateColorFromString(trimmedName),
-		avatar: getInitials(trimmedName),
-		role: 'admin',
-		personal_access_token_hash: patHash,
-		created_at: now
-	});
-
-	const { sessionToken, expiresAt } = createSessionForUser(userId);
-
-	debug.log('auth', `Admin account created: ${trimmedName} (${userId})`);
-
-	return {
-		user: toAuthUser(dbUser),
-		sessionToken,
-		expiresAt,
-		personalAccessToken: pat
-	};
 }
 
 /**

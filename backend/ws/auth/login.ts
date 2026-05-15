@@ -13,6 +13,7 @@ import {
 	createOrGetNoAuthAdmin,
 	needsSetup
 } from '$backend/auth/auth-service';
+import { acquireSetupLock, releaseSetupLock } from '$backend/auth/setup-lock';
 import { settingsQueries } from '$backend/database/queries';
 import { getTokenType } from '$backend/auth/tokens';
 import { authRateLimiter } from '$backend/auth/rate-limiter';
@@ -66,26 +67,35 @@ export const loginHandler = createRouter()
 			expiresAt: t.String()
 		})
 	}, async ({ conn }) => {
-		if (!needsSetup()) {
-			throw new Error('Setup already completed.');
+		// Acquire setup lock to prevent race conditions
+		if (!acquireSetupLock()) {
+			throw new Error('Setup already in progress');
 		}
 
-		// Save authMode to system settings
-		const currentSettings = settingsQueries.get('system:settings');
-		const parsed = currentSettings?.value
-			? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
-			: {};
-		parsed.authMode = 'none';
-		settingsQueries.set('system:settings', JSON.stringify(parsed));
+		try {
+			if (!needsSetup()) {
+				throw new Error('Setup already completed.');
+			}
 
-		// Create or get default admin
-		const result = createOrGetNoAuthAdmin();
+			// Save authMode to system settings
+			const currentSettings = settingsQueries.get('system:settings');
+			const parsed = currentSettings?.value
+				? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
+				: {};
+			parsed.authMode = 'none';
+			settingsQueries.set('system:settings', JSON.stringify(parsed));
 
-		// Set auth on connection
-		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
-		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
+			// Create or get default admin
+			const result = createOrGetNoAuthAdmin();
 
-		return result;
+			// Set auth on connection
+			const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
+			ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
+
+			return result;
+		} finally {
+			releaseSetupLock();
+		}
 	})
 
 	// Auto-login for no-auth mode (returning visitors)

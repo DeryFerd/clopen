@@ -14,6 +14,22 @@
 	}
 
 	const PANEL_STATE_VERSION = 1;
+
+	/**
+	 * Clean up persisted state for a specific project.
+	 * Called when a project is removed to prevent memory leaks.
+	 */
+	export function cleanupProjectState(projectPath: string): void {
+		projectFileStates.delete(projectPath);
+	}
+
+	/**
+	 * Clean up all persisted state.
+	 * Useful for testing or full reset scenarios.
+	 */
+	export function cleanupAllProjectStates(): void {
+		projectFileStates.clear();
+	}
 </script>
 
 <script lang="ts">
@@ -39,6 +55,14 @@
 		refreshGitStatus,
 		syncGitStatusForProject
 	} from '$frontend/stores/features/git-status.svelte';
+	import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
+
+	// Register cleanup with the centralized registry
+	registerProjectCleanup((_projectId, projectPath) => {
+		if (projectPath) {
+			cleanupProjectState(projectPath);
+		}
+	});
 
 	// Props
 	interface Props {

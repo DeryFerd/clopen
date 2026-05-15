@@ -16,6 +16,7 @@ import { soundNotification, pushNotification } from '$frontend/services/notifica
 import { projectState } from '$frontend/stores/core/projects.svelte';
 import { debug } from '$shared/utils/logger';
 import ws from '$frontend/utils/ws';
+import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
 
 class GlobalStreamMonitor {
   private initialized = false;
@@ -108,13 +109,28 @@ class GlobalStreamMonitor {
   }
 
   /**
-   * Clear state (for cleanup/testing)
+   * Clean up notified tool_use IDs for a specific project.
+   * Called when a project is removed to prevent memory leaks.
+   * Since toolUseIds are global, we clear the entire set as a safety measure.
+   */
+  cleanupProjectNotifications(): void {
+    this.notifiedToolUseIds.clear();
+    debug.log('notification', 'GlobalStreamMonitor: Cleared notification state for project cleanup');
+  }
+
+  /**
+   * Clear all state (for cleanup/testing)
    */
   clear(): void {
     this.notifiedToolUseIds.clear();
-    debug.log('notification', 'GlobalStreamMonitor: Clearing state');
+    debug.log('notification', 'GlobalStreamMonitor: Clearing all state');
   }
 }
 
 // Export singleton instance
 export const globalStreamMonitor = new GlobalStreamMonitor();
+
+// Register cleanup with the centralized registry
+registerProjectCleanup(() => {
+  globalStreamMonitor.cleanupProjectNotifications();
+});

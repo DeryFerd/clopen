@@ -5,6 +5,7 @@
 	import { debug } from '$shared/utils/logger';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import type { DeviceSize, Rotation } from '$frontend/utils/preview-constants';
+	import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
 
 	// Project-aware state
 	const hasActiveProject = $derived(projectState.currentProject !== null);
@@ -18,6 +19,27 @@
 		deviceSize: DeviceSize;
 		rotation: Rotation;
 	}>();
+
+	/**
+	 * Clean up preview state for a specific project.
+	 * Called when a project is removed to prevent memory leaks.
+	 */
+	export function cleanupProjectPreviewState(projectId: string): void {
+		projectPreviewState.delete(projectId);
+	}
+
+	/**
+	 * Clean up all project preview states.
+	 * Useful for testing or full reset scenarios.
+	 */
+	export function cleanupAllProjectPreviewStates(): void {
+		projectPreviewState.clear();
+	}
+
+	// Register cleanup with the centralized registry
+	registerProjectCleanup((pid) => {
+		cleanupProjectPreviewState(pid);
+	});
 
 	let lastProjectId = $state<string>('');
 

@@ -19,6 +19,11 @@ export const authRouter = createRouter()
 	.emit('auth:force-logout', t.Object({
 		reason: t.String()
 	}))
+	// Declare auth:force-logout-user event (emitted when a specific user's sessions should be invalidated)
+	.emit('auth:force-logout-user', t.Object({
+		userId: t.String(),
+		reason: t.String()
+	}))
 	// Declare auth:user-projects-changed event (broadcast on every assignment
 	// change so the target user's navigator and any admin viewing the
 	// per-user projects modal can both refresh in realtime).

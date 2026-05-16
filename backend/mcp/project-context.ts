@@ -207,12 +207,47 @@ class ProjectContextService {
 	}
 
 	/**
+	 * Remove all session/stream mappings for a project (e.g. when the project
+	 * row is deleted and no users remain).
+	 */
+	clearByProjectId(projectId: string): void {
+		for (const [sessionId, pid] of [...this.sessionProjectMap.entries()]) {
+			if (pid === projectId) {
+				this.sessionProjectMap.delete(sessionId);
+			}
+		}
+
+		const streamIds = new Set<string>();
+		for (const [streamId, pid] of this.streamProjectMap.entries()) {
+			if (pid === projectId) {
+				streamIds.add(streamId);
+			}
+		}
+		for (const [streamId, info] of this.activeStreams.entries()) {
+			if (info.projectId === projectId) {
+				streamIds.add(streamId);
+			}
+		}
+		for (const streamId of streamIds) {
+			this.unregisterStream(streamId);
+		}
+
+		if (this.lastUsedProjectId === projectId) {
+			this.lastUsedProjectId = null;
+		}
+
+		debug.log('mcp', `Cleared MCP project context for project ${projectId}`);
+	}
+
+	/**
 	 * Clear all mappings (for testing or cleanup)
 	 */
 	clear(): void {
 		this.sessionProjectMap.clear();
 		this.streamProjectMap.clear();
+		this.activeStreams.clear();
 		this.streamSignals.clear();
+		this.mostRecentActiveStream = null;
 		this.lastUsedProjectId = null;
 		debug.log('mcp', '🧹 Cleared all project context mappings');
 	}

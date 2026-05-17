@@ -280,24 +280,23 @@ export class WSRouter<
 	private eventSchemas = new Map<string, TSchema>();
 
 	/** Optional auth middleware — called before every route handler */
-	private authMiddleware: ((conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>) | null = null;
+  private authMiddleware: ((conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>) | null = null;
+  private rateLimiter: ((conn: WSConnection, action: string) => boolean) | null = null;
 
-	constructor() {
-		// Register built-in context management route
-		this.registerContextHandler();
-	}
+  constructor() {
+    this.registerContextHandler();
+  }
 
-	/**
-	 * Set an auth middleware function that gates all route handlers.
-	 * The middleware receives the connection and action, and returns { allowed, error? }.
-	 * If not allowed, the handler is not called and an auth:error event is sent to the client.
-	 */
-	setAuthMiddleware(fn: (conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>): void {
-		this.authMiddleware = fn;
-	}
+  setAuthMiddleware(fn: (conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>): void {
+    this.authMiddleware = fn;
+  }
 
-	/**
-	 * Register built-in ws:set-context handler
+  setRateLimiter(fn: (conn: WSConnection, action: string) => boolean): void {
+    this.rateLimiter = fn;
+  }
+
+  /**
+   * Register built-in ws:set-context handler
 	 * Allows frontend to sync user/project context
 	 */
 	private registerContextHandler(): void {
@@ -626,7 +625,13 @@ export class WSRouter<
 					return;
 				}
 			}
-			// ═══ END AUTH GATE ═══
+            // ═══ END AUTH GATE ═══
+
+            // ═══ RATE LIMIT GATE ═══
+            if (this.rateLimiter && !this.rateLimiter(conn, action)) {
+              return;
+            }
+            // ═══ END RATE LIMIT GATE ═══
 
 			// Check if this is an HTTP route
 			const httpRoute = this.httpRoutes.get(action);

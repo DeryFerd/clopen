@@ -28,6 +28,7 @@ export type LogLabel =
 	| 'websocket'
 	| 'mcp'
 	| 'notification'
+	| 'rate-limit'
 	
 	// Configuration
 	| 'project'

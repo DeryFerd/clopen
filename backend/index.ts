@@ -39,12 +39,18 @@ import { checkRouteAccess } from './auth/permissions';
 import { authRateLimiter } from './auth';
 import { sessionCleanupScheduler } from './auth/session-cleanup';
 import { ws as wsServer } from './utils/ws';
+import { messageRateLimiter } from './ws/message-rate-limiter';
 
 // Register auth gate on WebSocket router — blocks unauthenticated/unauthorized access
 wsRouter.setAuthMiddleware(async (conn, action) => {
-	const isAuth = wsServer.isAuthenticated(conn);
-	const role = wsServer.getRole(conn);
-	return checkRouteAccess(action, isAuth, role);
+  const isAuth = wsServer.isAuthenticated(conn);
+  const role = wsServer.getRole(conn);
+  return checkRouteAccess(action, isAuth, role);
+});
+
+// Register message rate limiter on WebSocket router — prevents DoS via message spam
+wsRouter.setRateLimiter((conn, action) => {
+  return messageRateLimiter.checkRateLimit(conn, action);
 });
 
 /**
@@ -192,6 +198,8 @@ async function gracefulShutdown() {
 		app.stop();
 		// Dispose rate limiter timer
 		authRateLimiter.dispose();
+		// Dispose message rate limiter timer
+		messageRateLimiter.dispose();
 		// Dispose expired session cleanup timer
 		sessionCleanupScheduler.dispose();
 		// Close MCP remote server (before engines, as they may still reference it)

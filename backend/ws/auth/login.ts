@@ -13,7 +13,7 @@ import {
 	createOrGetNoAuthAdmin,
 	needsSetup
 } from '$backend/auth/auth-service';
-import { settingsQueries } from '$backend/database/queries';
+import { settingsQueries, auditLogQueries } from '$backend/database/queries';
 import { getTokenType } from '$backend/auth/tokens';
 import { authRateLimiter } from '$backend/auth/rate-limiter';
 import { ws } from '$backend/utils/ws';
@@ -139,12 +139,13 @@ export const loginHandler = createRouter()
 			const result = loginWithToken(data.token);
 
 			// Success — clear any rate limit record for this IP
-			if (isRateLimited) {
-				authRateLimiter.recordSuccess(ip);
-			}
+      if (isRateLimited) {
+        authRateLimiter.recordSuccess(ip);
+      }
 
-			// Set auth on connection
-			ws.setAuth(conn, result.user.id, result.user.role, result.tokenHash);
+      auditLogQueries.logEvent({ userId: result.user.id, eventType: 'auth:login', eventDetails: `User ${result.user.name} logged in via ${tokenType} token`, ipAddress: ip });
+
+      ws.setAuth(conn, result.user.id, result.user.role, result.tokenHash);
 
 			return {
 				user: result.user,
@@ -228,21 +229,21 @@ export const loginHandler = createRouter()
 	})
 
 	// Logout — clear session
-	.http('auth:logout', {
-		data: t.Object({}),
-		response: t.Object({
-			success: t.Boolean()
-		})
-	}, async ({ conn }) => {
-		const state = ws.getConnectionState(conn);
-		if (state?.sessionTokenHash) {
-			logout(state.sessionTokenHash);
-		}
-		ws.clearAuth(conn);
-		return { success: true };
-	})
+  .http('auth:logout', {
+    data: t.Object({}),
+    response: t.Object({ success: t.Boolean() })
+  }, async ({ conn }) => {
+    const state = ws.getConnectionState(conn);
+    const userId = state?.userId;
+    if (state?.sessionTokenHash) logout(state.sessionTokenHash);
+    ws.clearAuth(conn);
+    if (userId) {
+      auditLogQueries.logEvent({ userId, eventType: 'auth:logout', eventDetails: 'User logged out', ipAddress: ws.getRemoteAddress(conn) });
+    }
+    return { success: true };
+  })
 
-	// Regenerate Personal Access Token
+  // Regenerate Personal Access Token
 	.http('auth:regenerate-pat', {
 		data: t.Object({}),
 		response: t.Object({
@@ -255,26 +256,19 @@ export const loginHandler = createRouter()
 	})
 
 	// Logout all sessions (admin only — used when switching auth mode)
-	.http('auth:logout-all', {
-		data: t.Object({}),
-		response: t.Object({
-			count: t.Number()
-		})
-	}, async () => {
-		const count = logoutAllSessions();
+  .http('auth:logout-all', {
+    data: t.Object({}),
+    response: t.Object({ count: t.Number() })
+  }, async ({ conn }) => {
+    const adminId = ws.getUserId(conn);
+    const count = logoutAllSessions();
+    ws.emit.global('auth:force-logout', { reason: 'Auth mode changed' });
+    ws.clearAllAuth();
+    auditLogQueries.logEvent({ userId: adminId, eventType: 'auth:logout-all', eventDetails: `Admin logged out all sessions (${count} sessions cleared)` });
+    return { count };
+  })
 
-		// Broadcast force-logout to ALL connected clients before clearing auth.
-		// This ensures clients receive the event while still connected.
-		ws.emit.global('auth:force-logout', { reason: 'Auth mode changed' });
-
-		// Clear in-memory auth state on all active WebSocket connections.
-		// After this, the auth gate will block any further messages.
-		ws.clearAllAuth();
-
-		return { count };
-	})
-
-	// Update display name (authenticated user)
+  // Update display name (authenticated user)
 	.http('auth:update-name', {
 		data: t.Object({
 			newName: t.String({ minLength: 1 })

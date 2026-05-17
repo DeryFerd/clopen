@@ -34,6 +34,7 @@ import * as migration032 from './032_seed_copilot_provider';
 import * as migration033 from './033_seed_codex_provider';
 import * as migration034 from './034_seed_qwen_provider';
 import * as migration035 from './035_add_owner_to_db_client_connections';
+import * as migration036 from './036_create_auth_audit_log';
 
 // Export all migrations in order
 export const migrations = [
@@ -246,6 +247,12 @@ export const migrations = [
 		description: migration035.description,
 		up: migration035.up,
 		down: migration035.down
+	},
+	{
+		id: '036',
+		description: 'Create auth audit log table',
+		up: migration036.up,
+		down: migration036.down
 	}
 ];
 

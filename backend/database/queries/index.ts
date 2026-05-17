@@ -10,3 +10,4 @@ export { engineQueries } from './engine-queries';
 export { authQueries } from './auth-queries';
 export { dbClientConnectionQueries } from './db-client-connection-queries';
 export { dbClientQueryHistoryQueries } from './db-client-query-history-queries';
+export { auditLogQueries } from './audit-log-queries';

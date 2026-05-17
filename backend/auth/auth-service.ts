@@ -524,7 +524,6 @@ export function unassignProjectFromUser(userId: string, projectId: string): bool
 	}
 	projectQueries.removeUserProject(userId, projectId);
 	debug.log('auth', `Project ${projectId} unassigned from user ${userId}`);
-
 	return true;
 }
 

@@ -23,6 +23,11 @@ class ProjectCleanupRegistry {
 	}
 
 	/** @internal Test helper */
+	_getHandlerNames(): string[] {
+		return this.handlers.map((handler) => handler.name);
+	}
+
+	/** @internal Test helper */
 	_clearHandlers(): void {
 		this.handlers = [];
 	}

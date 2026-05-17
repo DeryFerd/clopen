@@ -176,6 +176,13 @@ export async function getProjectStatusData(projectId?: string) {
   }
 }
 
+/**
+ * Drop in-memory presence for a project (e.g. after full project delete).
+ */
+export function clearProjectPresence(projectId: string): void {
+  projectUsers.delete(projectId);
+}
+
 // Update user presence
 export function updateUserPresence(projectId: string, userId: string, userName: string, action: string) {
   cleanupInactiveUsers();

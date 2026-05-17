@@ -148,6 +148,8 @@ export async function createFileOperation(filePath: string, content: string = ''
 		throw new Error('File path is required');
 	}
 
+	validateFileSize(Buffer.byteLength(content, 'utf8'));
+
 	try {
 		// Normalize path for Windows only
 		const normalizedFilePath = process.platform === 'win32' ?
@@ -372,8 +374,9 @@ export async function uploadFileOperation(file: { name: string; type: string; si
 		throw new Error('Target path is required');
 	}
 
-	// Validate file size before writing
-	validateFileSize(file.size);
+	// Validate the actual byte length of the payload, not the client-supplied
+	// `file.size` field — a mismatched value would otherwise bypass the limit.
+	validateFileSize(file.data.byteLength);
 
 	try {
 		// Normalize target path for Windows only

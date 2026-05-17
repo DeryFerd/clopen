@@ -4,6 +4,7 @@ import { debug } from '$shared/utils/logger';
 import { join, extname, basename, relative } from 'path';
 import { readdir } from 'fs/promises';
 import { requireProjectPathAccess } from './path-access';
+import { validateFileSize } from '../../files/file-size-limit';
 
 // Directories to skip during search
 const SKIP_DIRS = new Set([
@@ -316,6 +317,9 @@ async function replaceInFiles(
 			const matchCount = (content.match(pattern) || []).length;
 			if (matchCount > 0) {
 				const newContent = content.replace(pattern, replaceWith);
+				// Replacements can balloon a file's size (e.g. short pattern → long
+				// replacement). Validate post-expansion size before writing.
+				validateFileSize(Buffer.byteLength(newContent, 'utf8'));
 				await Bun.write(fullPath, newContent);
 
 				results.push({

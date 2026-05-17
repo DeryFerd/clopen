@@ -13,6 +13,7 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { z } from "zod";
 import { projectContextService } from '../project-context';
+import { validateMcpOutput } from '../output-validator';
 
 /**
  * Infer argument types from Zod schema
@@ -204,7 +205,11 @@ export function createRemoteMcpServer(
 						isError: true,
 					} as any;
 				}
-				return await def.handler(args) as any;
+				const result = await def.handler(args) as any;
+				if (result?.content) {
+					result.content = validateMcpOutput(result.content, toolName as string);
+				}
+				return result;
 			});
 		}
 	}

@@ -15,6 +15,7 @@ import { serverRegistry, serverFactories, serverMetadata } from './servers';
 import { projectContextService } from './project-context';
 import { debug } from '$shared/utils/logger';
 import { SERVER_ENV } from '../utils/env';
+import { validateMcpOutput } from './output-validator';
 
 /**
  * User-defined MCP Servers Configuration
@@ -117,7 +118,9 @@ export function getEnabledMcpServers(context?: McpExecutionContext): Record<stri
 							if (signal?.aborted) {
 								return abortedToolResult(toolName);
 							}
-							return def.handler(args);
+							const result = await def.handler(args);
+							result.content = validateMcpOutput(result.content, toolName);
+							return result;
 						});
 					};
 					return tool(toolName, def.description, def.schema, boundHandler as any);

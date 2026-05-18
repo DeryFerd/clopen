@@ -78,11 +78,20 @@ Read the full diff before forming a position. Do not skim, do not draft comments
 
 ### 2. Audit
 
-After reading the diff, evaluate three things **before** asking the contributor to validate or iterate:
+After reading the diff, evaluate four things **before** asking the contributor to validate or iterate:
 
 1. **Adjacent code** — search the codebase for similar gaps the PR didn't address. Bugs of the same shape usually cluster; if one site needed fixing, others likely do too. This matters most for security and refactor PRs.
 2. **Adjacent patterns** — does the PR introduce a new mechanism where an established pattern in the codebase already covers this class of problem? Default to the established pattern unless the contributor can articulate why it doesn't fit.
 3. **Test coverage** — does the change include `*.test.ts` where [CONTRIBUTING.md → Tests](./CONTRIBUTING.md#tests) expects them? If a test is missing, decide whether you add it on the branch ([Path B](#path-b--iterate-on-the-branch)) or request it from the contributor ([Path D](#path-d--comment-and-wait)). Security PRs without a regression test are not merge-ready.
+4. **Before/after failure scenario** — walk through at least one real-case scenario in user-visible terms, showing what happens **without** the PR and what changes **with** it. The audit isn't complete until you can articulate the failure as concrete steps (who does what, what state results, which `file.ts:LL` holds that state) and the fix as the same steps under the new behavior. Deliver this inline with the audit findings — don't wait for the maintainer to ask. It also seeds the regression test in step 3: if a contributor wouldn't know where to start writing the test, the scenario you walked through usually shows them.
+
+   Shape:
+
+   > *"User does X (at `path/to/file.ts:LL`, state Y is created). Triggers Z.*
+   > ***Without PR:** Y persists / leaks / misbehaves → [observable consequence — orphaned map entry, stale subscription, wrong UI state, etc.].*
+   > ***With PR:** Y is cleaned up at [new code location, `path/to/fix.ts:LL`]; next observation confirms clean state."*
+
+   When the fix depends on a non-obvious guard (e.g. why `mode: 'remove'` is intentionally excluded from a cleanup path), add a second scenario showing what would break if the guard were dropped. This is how reviewers later understand *why* the guard is load-bearing instead of treating it as defensive sugar that can be relaxed.
 
 The audit is what determines the review path. Skipping it and going straight to "looks good, please test" is the most common cause of churn.
 

@@ -170,6 +170,8 @@ Tests must pass before opening the PR.
 
 ## Submitting Changes
 
+All written content on the repository — branch names, commit messages, PR titles, PR descriptions, and PR comments — must be in **English**, regardless of the language you and the maintainers use elsewhere. This keeps the contribution trail readable across the project's audience.
+
 ### Branch Naming
 
 Format: `<type>/<description>` — lowercase, kebab-case, concise. **Exactly one `/`**: the type, then the description. Nested paths are not allowed.

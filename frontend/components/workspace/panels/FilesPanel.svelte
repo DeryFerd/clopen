@@ -1,4 +1,6 @@
 <script module lang="ts">
+	import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
+
 	// In-memory snapshot survives component destruction within the same SPA
 	// session (e.g. mobile/desktop layout switch). DB remains the source of
 	// truth for cross-device persistence.
@@ -14,6 +16,23 @@
 	}
 
 	const PANEL_STATE_VERSION = 1;
+
+	/**
+	 * Clean up persisted state for a specific project.
+	 * Called when a project is removed to prevent memory leaks.
+	 */
+	export function cleanupProjectState(projectPath: string): void {
+		projectFileStates.delete(projectPath);
+	}
+
+	function cleanupProjectFilePanelState(_projectId: string, projectPath?: string): void {
+		if (projectPath) {
+			cleanupProjectState(projectPath);
+		}
+	}
+
+	// Register once at module load to avoid duplicate closures on remount.
+	registerProjectCleanup(cleanupProjectFilePanelState);
 </script>
 
 <script lang="ts">

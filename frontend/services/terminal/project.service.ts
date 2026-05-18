@@ -10,6 +10,7 @@ import type { TerminalSession } from '$shared/types/terminal';
 import { terminalService } from './terminal.service';
 import { debug } from '$shared/utils/logger';
 import { onWsReconnect } from '$frontend/utils/ws';
+import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
 interface ProjectTerminalContext {
 	projectId: string;
 	projectPath: string;
@@ -721,6 +722,28 @@ class TerminalProjectManager {
 	}
 
 	/**
+	 * Remove all in-memory terminal context for a deleted project.
+	 */
+	cleanupProjectContext(projectId: string): void {
+		const context = this.projectContexts.get(projectId);
+		if (!context) return;
+
+		for (const sessionId of context.sessionIds) {
+			terminalService.cleanupListeners(sessionId);
+			terminalPersistenceManager.removeSession(sessionId);
+			terminalSessionManager.removeSession(sessionId);
+		}
+
+		this.projectContexts.delete(projectId);
+		if (this.currentProjectId === projectId) {
+			this.currentProjectId = null;
+			terminalStore.clearAllSessions();
+		}
+
+		debug.log('terminal', `Cleaned terminal project context for deleted project: ${projectId}`);
+	}
+
+	/**
 	 * Initialize the manager and setup collaborative WebSocket listeners
 	 * Project contexts are created on demand via switchToProject()
 	 */
@@ -1002,3 +1025,7 @@ class TerminalProjectManager {
 
 // Export singleton instance
 export const terminalProjectManager = new TerminalProjectManager();
+
+registerProjectCleanup((projectId) => {
+	terminalProjectManager.cleanupProjectContext(projectId);
+});

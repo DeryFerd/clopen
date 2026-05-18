@@ -5,19 +5,11 @@
 	import { debug } from '$shared/utils/logger';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import type { DeviceSize, Rotation } from '$frontend/utils/preview-constants';
+	import { getProjectPreviewState, setProjectPreviewState } from '$frontend/utils/preview-project-state';
 
 	// Project-aware state
 	const hasActiveProject = $derived(projectState.currentProject !== null);
 	const projectId = $derived(projectState.currentProject?.id || '');
-
-	// Store per-project preview state
-	const projectPreviewState = new Map<string, {
-		isOpen: boolean;
-		url: string;
-		mode: 'split' | 'tab';
-		deviceSize: DeviceSize;
-		rotation: Rotation;
-	}>();
 
 	let lastProjectId = $state<string>('');
 
@@ -61,7 +53,7 @@
 		if (hasActiveProject && projectId) {
 			// Save current project state before switching
 			if (lastProjectId && lastProjectId !== projectId) {
-				projectPreviewState.set(lastProjectId, {
+				setProjectPreviewState(lastProjectId, {
 					isOpen,
 					url,
 					mode,
@@ -72,7 +64,7 @@
 			}
 
 			// Restore previous state for this project
-			const savedState = projectPreviewState.get(projectId);
+			const savedState = getProjectPreviewState(projectId);
 			if (savedState) {
 				isOpen = savedState.isOpen;
 				url = savedState.url;

@@ -10,6 +10,7 @@ import ws from '$frontend/utils/ws';
 import type { Project } from '$shared/types/database/schema';
 
 import { debug } from '$shared/utils/logger';
+import { cleanupProjectState } from '$frontend/utils/project-state-cleanup';
 
 // Subscribe to admin-driven project assignment changes for the current user.
 // Event is broadcast globally; only react when this client is the target.
@@ -221,12 +222,20 @@ export function updateProject(updatedProject: Project) {
 }
 
 export function removeProject(projectId: string) {
+	// Get project path before removal for cleanup
+	const projectToRemove = projectState.projects.find(p => p.id === projectId);
+	const projectPath = projectToRemove?.path || '';
+
 	projectState.projects = projectState.projects.filter(p => p.id !== projectId);
 
 	// Clear current project if it's being removed
 	if (projectState.currentProject?.id === projectId) {
 		projectState.currentProject = null;
 	}
+
+	// Clean up in-memory state to prevent memory leaks
+	cleanupProjectState(projectId, projectPath);
+
 	updateRecentProjects();
 }
 

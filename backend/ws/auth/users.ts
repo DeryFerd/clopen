@@ -7,6 +7,7 @@ import {
 	assignProjectToUser,
 	unassignProjectFromUser
 } from '$backend/auth/auth-service';
+import { invalidateUserSessions } from '$backend/auth/session-invalidation';
 import { ws } from '$backend/utils/ws';
 
 export const usersHandler = createRouter()
@@ -82,6 +83,7 @@ export const usersHandler = createRouter()
 	}, async ({ data }) => {
 		const removed = unassignProjectFromUser(data.userId, data.projectId);
 		if (removed) {
+			invalidateUserSessions(data.userId);
 			ws.emit.global('auth:user-projects-changed', {
 				type: 'unassigned',
 				userId: data.userId,

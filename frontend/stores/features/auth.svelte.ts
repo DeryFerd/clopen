@@ -43,6 +43,17 @@ ws.on('auth:force-logout', (payload) => {
 	authState = 'login';
 });
 
+// Listen for targeted force-logout (e.g., project access revoked)
+ws.on('auth:force-logout-user', (payload) => {
+	debug.log('auth', `User force-logout received: ${payload.reason}`);
+	currentUser = null;
+	sessionToken = null;
+	personalAccessToken = null;
+	localStorage.removeItem(SESSION_TOKEN_KEY);
+	ws.setSessionToken(null);
+	authState = 'login';
+});
+
 export const authStore = {
 	get authState() { return authState; },
 	get currentUser() { return currentUser; },

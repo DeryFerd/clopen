@@ -607,6 +607,52 @@ class WSServer {
 	}
 
 	/**
+	 * Get all active WebSocket connections for a specific user.
+	 * Used for session invalidation when project access changes.
+	 *
+	 * @param userId - The user ID to look up
+	 * @returns Array of active WSConnection objects for the user
+	 */
+	getConnectionsForUser(userId: string): WSConnection[] {
+		const userConns = this.userConnections.get(userId);
+		if (!userConns) return [];
+
+		const result: WSConnection[] = [];
+		for (const wsConn of userConns.values()) {
+			if (wsConn.readyState === 1) { // Only active connections
+				result.push(wsConn);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Clear authentication state for a specific set of connections.
+	 * Used for targeted session invalidation (e.g., when project access is revoked).
+	 *
+	 * @param connections - Array of connections to clear
+	 * @returns Number of connections that were cleared
+	 */
+	clearAuthForConnections(connections: WSConnection[]): number {
+		let cleared = 0;
+		for (const conn of connections) {
+			const id = this.resolveId(conn);
+			if (!id) continue;
+			const state = this.connectionState.get(id);
+			if (state && state.authenticated) {
+				state.authenticated = false;
+				state.role = null;
+				state.sessionTokenHash = null;
+				cleared++;
+			}
+		}
+		if (cleared > 0) {
+			debug.log('websocket', `Cleared auth on ${cleared} targeted connection(s)`);
+		}
+		return cleared;
+	}
+
+	/**
 	 * Check if connection can receive data (backpressure check)
 	 */
 	private canSend(conn: WSConnection): boolean {

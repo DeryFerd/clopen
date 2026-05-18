@@ -1,4 +1,6 @@
 <script module lang="ts">
+	import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
+
 	// In-memory snapshot survives component destruction within the same SPA
 	// session (e.g. mobile/desktop layout switch). DB remains the source of
 	// truth for cross-device persistence.
@@ -23,13 +25,14 @@
 		projectFileStates.delete(projectPath);
 	}
 
-	/**
-	 * Clean up all persisted state.
-	 * Useful for testing or full reset scenarios.
-	 */
-	export function cleanupAllProjectStates(): void {
-		projectFileStates.clear();
+	function cleanupProjectFilePanelState(_projectId: string, projectPath?: string): void {
+		if (projectPath) {
+			cleanupProjectState(projectPath);
+		}
 	}
+
+	// Register once at module load to avoid duplicate closures on remount.
+	registerProjectCleanup(cleanupProjectFilePanelState);
 </script>
 
 <script lang="ts">
@@ -55,14 +58,6 @@
 		refreshGitStatus,
 		syncGitStatusForProject
 	} from '$frontend/stores/features/git-status.svelte';
-	import { registerProjectCleanup } from '$frontend/utils/project-state-cleanup';
-
-	// Register cleanup with the centralized registry
-	registerProjectCleanup((_projectId, projectPath) => {
-		if (projectPath) {
-			cleanupProjectState(projectPath);
-		}
-	});
 
 	// Props
 	interface Props {

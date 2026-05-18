@@ -5,6 +5,8 @@
  * to prevent memory leaks when projects are removed.
  */
 
+import { debug } from '$shared/utils/logger';
+
 type CleanupFn = (projectId: string, projectPath?: string) => void;
 
 const cleanupRegistry = new Set<CleanupFn>();
@@ -30,7 +32,7 @@ export function cleanupProjectState(projectId: string, projectPath?: string): vo
 			fn(projectId, projectPath);
 		} catch (error) {
 			// Continue with other cleanups even if one fails
-			console.error('Project cleanup failed:', error);
+			debug.error('project', 'Project cleanup failed:', error);
 		}
 	}
 }

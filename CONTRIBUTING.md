@@ -270,14 +270,47 @@ Add only when relevant — empty headers add noise:
 
 ### Comments on Existing PRs
 
-A PR comment is a conversation, not a document — write it that way. Section headers (`## Summary / ## Why / ## Changes / ## Notes`) belong in PR *descriptions*, not in comments. Use prose.
+Match the comment's shape to its substance. Most contributor comments are short replies and read best as prose; a few situations warrant lists or topic sections so reviewers can scan.
 
-Two cases:
+The examples below are illustrative templates, not literal copy-paste — angle-bracket slots like `<the specific reasoning>` and concrete-looking names should be replaced with what's actually in your PR. Structural pieces (the opening "Thanks for…", the closing commitment, `## Header` shapes) are the lesson; keep those.
 
-- **You pushed commits or expanded scope.** Open by recognizing the contributor's original work, then describe what you added in a short paragraph — the files touched and why. Reviewers will read the diff for details; the comment exists to orient them, not to mirror it.
-- **Reply, question, or counter.** Lead with one or two sentences that acknowledge something specific (the catch, the reasoning, the test scaffolding) — generic "thanks" reads as filler. Then raise concerns in prose, anchored to file:line inline. Long, templated comments hide the actual ask; warmth and brevity are not opposites.
+**Prose — the default.** Short replies, single-topic responses, agreements, clarifications. Open with one or two sentences that name something specific you took from the review (the catch, the file:line reference, the reasoning) — generic "thanks" is filler. Then raise your reply, concern, or counter in prose, anchored to file:line inline. Warmth and brevity are not opposites.
 
-Paths and identifiers in backticks. `@username` for mentions. Dates as plain English (`May 25, 2026`), not ISO format.
+```markdown
+Thanks for the careful breakdown. I re-validated the flow and I agree with your assessment: `<the specific point the maintainer made, in your own words>`. So `<the practical consequence — why the original fix shape doesn't apply, or what changes in your understanding>`.
+
+I'm closing this PR to avoid carrying the wrong abstraction. If `<the condition that would make the original direction relevant>` changes in the future, I'll open a separate PR with `<the alternative approach — the layer it belongs at, the test that would pin it>`.
+```
+
+**Validation-result list.** When responding to a maintainer's "please verify end-to-end" request, a bulleted list of what you ran is appropriate — it's concrete evidence, not framing. Keep the items factual; one line each. Only include items you actually ran; if the maintainer didn't ask for a manual UI walkthrough, the universal commands alone are fine.
+
+```markdown
+Thanks for the guidance. I re-tested this PR locally after installing Bun.
+
+Validation performed:
+- `bun run check` passes with 0 errors / 0 warnings.
+- `bun run lint` passes.
+- Started the app locally with `bun run dev` and exercised <the specific flow the maintainer asked about>.
+
+<Optional one-sentence summary tying the validation back to the maintainer's concern, if it isn't obvious from the items above.>
+```
+
+If the maintainer asked you to verify multiple distinct scenarios (e.g. a positive case and a negative case for an authorization change), add one bullet per scenario — each describing what you did and what you observed, not just "verified X". The bullets mirror what was actually asked; they aren't a fixed checklist.
+
+**Topic sections** (`## <Topic Name>`) — use when:
+
+- You pushed commits or expanded scope and the additions span multiple files/areas. Mirror the PR-description shape (`## Summary / ## Why / ## Changes / ## Notes`) so reviewers can scan what's new.
+- Your reply addresses multiple distinct concerns the maintainer raised (e.g. a blocker + a process question + a follow-up commitment). One `##` per class, prose inside.
+
+For everything else — single reply, agreement with the audit, clarification of one detail — prose is shorter and clearer.
+
+**Either way:**
+
+- File paths and identifiers in backticks.
+- `@username` for mentions.
+- Dates as plain English (`May 25, 2026`), not ISO format.
+- One issue per paragraph. No restated context.
+- Avoid numbered audit-verdict lists with bolded leads (`**1. Issue:** ...`) — they read as a checklist handed back, not a conversation.
 
 ---
 

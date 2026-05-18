@@ -21,6 +21,7 @@ Internal guide for Clopen core maintainers. External contributors should follow 
   - [Path E — Close and Replace](#path-e--close-and-replace)
 - [Security PRs](#security-prs)
 - [Communication Norms](#communication-norms)
+  - [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections)
   - [Suggest by Default; Act on Confirmation](#suggest-by-default-act-on-confirmation)
 - [Operational Policy](#operational-policy)
   - [Force-Push](#force-push)
@@ -52,7 +53,7 @@ These principles inform every decision in this guide. Cite them in a PR comment 
 - **Stay persuadable until you've decided.** If a comment raises concerns, it should also state what would change your mind. If you can't articulate that, you've already decided — pick a different path.
 - **Closure is administrative, not adversarial.** A closed PR can always be reopened. Frame closure as housekeeping with the door open, never as rejection.
 - **Attribution always.** Whether you build on a contributor's branch or close-and-replace, the original audit instinct still earns credit.
-- **Warm, brief, substantive — in that order.** Open with one or two sentences that recognize something *specific* the contributor did well (the security instinct, the careful edge-case writeup, the test scaffolding). Generic "thanks for the PR" reads as filler; named appreciation lands. Then go straight to the audit findings in prose, anchored to file:line inline, invite counter, then stop. Multi-paragraph framing and "I want to merge this, but..." padding hide the ask — but so does cold, headerless terseness with no acknowledgement at all. Write the comment a senior engineer would feel respected receiving.
+- **Warm, brief, substantive — in that order.** Open with one or two sentences that recognize something *specific* the contributor did well (the security instinct, the careful edge-case writeup, the test scaffolding). Generic "thanks for the PR" reads as filler; named appreciation lands. Then shape the body to the substance: a single concern reads as a short paragraph; multiple concern classes (blockers + minor + please-add) get topic sections (`## Blockers`, `## Minor`, etc.) so reviewers can scan. One issue per paragraph either way, file:line inline, no restated context, no "I want to merge this, but..." padding. See [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections) for the full pattern. Write the comment a senior engineer would feel respected receiving.
 
 ---
 
@@ -130,7 +131,7 @@ git branch -D <merged-branch>
 
 Five paths, one per row of [Choose a Review Path](#3-choose-a-review-path). Each subsection is self-contained: when to use it, the procedure (if any git ops), and a worked example comment.
 
-Worked examples use these placeholders: `@contributor`, `#NNN`, `path/to/file.ts:LL`, dates in `YYYY-MM-DD`. All comments are posted via the GitHub PR UI per [Communication Norms](#communication-norms).
+Worked examples are illustrative templates, not literal copy-paste. The recurring placeholders are `@contributor`, `#NNN`, `path/to/file.ts:LL`, and dates (always plain English on the PR — `May 25, 2026` — not ISO). Anywhere an example contains an angle-bracket slot like `<the specific flow>` or a concrete-looking name (helper, function, scenario, error string) that varies per PR, treat it as a placeholder — substitute what's actually in the PR you're reviewing. Structural elements like `## Headers`, `### N.` numbering, `**Sub-group:**` labels, and the framing sentences around examples are the lesson; keep those literal. All comments are posted via the GitHub PR UI per [Communication Norms](#communication-norms).
 
 ### Path A — Approve and Merge
 
@@ -173,13 +174,45 @@ Use `merge` (not `rebase`) when syncing with `main` to preserve the contributor'
 
 #### Post-push comment
 
-Write the comment as prose — a PR comment is a conversation, not a document. The `## Summary / ## Why / ## Changes / ## Notes` structure belongs in PR *descriptions*, not in review comments. A short paragraph that names what you added and why is enough; reviewers will read the diff for the rest.
+Match the comment's shape to what you added. Two flavors — see [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections).
+
+**Small follow-up** — one or two adjacent call sites, a test, a doc tweak. Prose, one paragraph after the opener. Reviewers will read the diff for the rest.
 
 ```markdown
-Thanks @contributor — your fix at `path/to/file.ts:LL` was the right shape, and spotting the boundary case was a good catch. Built on top with two adjacent call sites (`path/to/a.ts:LL`, `path/to/b.ts:LL`) that took the same shape, plus a regression test for the 50MB boundary so the next round can't regress quietly. `bun run check` / `lint` / `test` green, synced with `main`.
+Thanks @contributor — your fix at `path/to/file.ts:LL` was the right shape, and spotting `<what they caught>` was a good call. Built on top with the adjacent call sites at `path/to/a.ts:LL` and `path/to/b.ts:LL` that took the same shape, plus a regression test pinning `<the boundary or invariant the original fix addressed>` so the next round can't regress quietly. `bun run check` / `lint` / `test` green, synced with `main`.
 ```
 
-If the additions are larger or touch unrelated areas, a couple more sentences are fine — but stay in prose. The bar is "the contributor can read this and immediately know what's now in their branch and why," not "every change has its own bullet."
+**Substantial follow-up** — multi-file changes, adjacent gaps swept in, behavioral additions. Use the PR-description shape (`## Summary / ## Why / ## Changes / ## Security impact / ## Notes`). This is the canonical exception to "section headers belong in PR descriptions": when the comment documents a substantial set of changes, reviewers need the same scannable shape.
+
+```markdown
+Hi @contributor, thanks a lot for this contribution! I built on top of your commit with a few additional fixes — everything has been pushed to this branch.
+
+## Summary
+<One- or two-sentence summary of what the follow-up adds on top of the original PR: the pattern extended, the gap closed, the area covered.>
+
+## Why
+<The motivation: what the audit surfaced that the original diff didn't cover, why it matters, with file:line anchors for the affected sites.>
+
+## Changes
+
+<Group related items under bolded sub-headers when the diff spans more than one concern; one bullet per touched site. Drop the sub-headers entirely if there's only one concern and a flat bullet list reads cleaner.>
+
+**<Sub-group label — e.g. the area or concern these changes share>:**
+- `path/to/file.ts:LL` — <what you did and which helper/pattern you reused>.
+- `path/to/other.ts:LL` — <same shape, if applicable>.
+
+**<Another sub-group, if the follow-up touches a separate concern>:**
+- `path/to/separate-concern.ts:LL` — <description>.
+
+## Security impact
+<One or two sentences: what's now closed, whether the follow-up aligns with or extends the original PR's threat model. Omit this section entirely if the follow-up isn't security-shaped.>
+
+## Notes
+- <Any constraint, follow-up, or context worth flagging — e.g. scope kept tight, no new helpers introduced, future work deferred to a separate PR.>
+- `bun run check` and `bun run lint` pass clean. Synced with `main`.
+```
+
+The bar either way is "the contributor can read this and immediately know what's now in their branch and why."
 
 ### Path C — Merge As-Is, Follow-up PR
 
@@ -201,23 +234,78 @@ Use when concerns are substantive but the contributor may have context or reason
 
 #### Comment shape
 
-Write it as prose — a Path D comment is a conversation with someone whose thinking you're building on, not a checklist. Three things have to be there, but they belong woven into the writing, not stacked as bolded headings:
+Every Path D comment needs:
 
-- An opener that recognizes something specific about the contributor's work. The instinct that surfaced the bug, the threat model they wrote, the test they pinned the boundary with — name it. "Thanks for the PR" with no specifics is filler.
-- Concerns anchored to file:line, raised conversationally. "At `path/to/file.ts:LL`, X happens — is there a reason..." reads as collaboration. A numbered list of bolded headings reads as an audit verdict.
-- The question whose answer would flip your position, woven into the relevant concern. If you can't articulate one, you've already decided — use [Path B](#path-b--iterate-on-the-branch) or [Path E](#path-e--close-and-replace).
-- A response deadline at the end. Without one, silence becomes drift. Write the date in plain English (`May 25, 2026`), not ISO (`2026-05-25`) — ISO dates read as machine output and pull the warmth out of the closing sentence.
-- Make the close-and-reopen consequence explicit, not euphemistic. *"If you can't respond by then, I'll close this PR as auto-stale — you can reopen anytime once you're back"* is clearer than *"happy to reopen the moment you're back"*, which buries the action and reads as if the close happens by itself.
-- If you flag adjacent out-of-scope surfaces and offer to take them on yourself, keep the technical flag and the ownership offer in separate paragraphs. The flag is audit signal; the offer is logistics — mixing them lets logistics bleed into the finding and reads as hedging.
+- **A warm, specific opener.** Name something the contributor did well — the instinct that surfaced the bug, the threat model they wrote, the test they pinned the boundary with. "Thanks for the PR" with no specifics is filler.
+- **Concerns anchored to file:line**, raised conversationally inside sentences ("at `path/to/file.ts:LL`, X happens — is there a reason..."), not as bolded leads of audit bullets.
+- **The question whose answer would flip your position**, woven into the relevant concern. If you can't articulate one, you've already decided — use [Path B](#path-b--iterate-on-the-branch) or [Path E](#path-e--close-and-replace).
+- **A response deadline** at the end. Without one, silence becomes drift. Write the date in plain English (`May 25, 2026`), not ISO (`2026-05-25`) — ISO dates read as machine output and pull the warmth out of the closing sentence.
+- **An explicit close-and-reopen consequence.** *"If you can't respond by then, I'll close this PR as auto-stale — you can reopen anytime once you're back"* is clearer than *"happy to reopen the moment you're back"*, which buries the action and reads as if the close happens by itself.
+- **Adjacent out-of-scope flag + ownership offer in separate paragraphs.** The flag is audit signal; the offer is logistics — mixing them lets logistics bleed into the finding and reads as hedging.
 
-Skip section headers (`## Summary` etc. — those are for PR descriptions), restated context the contributor already knows, and "I want to merge this, but..." padding. Warmth and brevity are not opposites: a four-sentence prose comment with named appreciation lands better than ten bullet points with bolded leads.
+Choose the body shape based on substance — see [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections). A single concern reads as prose. Multiple concern classes (blockers + minor + please-add + process-note) get topic sections so reviewers can scan.
+
+**Single-issue example — one regression, one process note.** Use topic sections when concerns belong to different classes, even if there are only two.
 
 ```markdown
-Thanks @contributor — the threat model in the description is the kind of thinking that makes these reviews easy, and the regression test you added covers the right boundary. Two things I'd like to talk through before merging:
+Hi @contributor, thanks for the fix — `<the specific thing they got right>` lands in the right place. Before we can merge, though, this PR introduces a regression that needs to be addressed.
 
-The validator at `path/to/file.ts:LL` checks `payload.size`, but the write a few lines down uses `payload.data` — a mismatched payload like `{ size: 1, data: <60MB Uint8Array> }` would slip past the limit. Is `payload.size` trusted by an earlier check I'm missing? If not, switching to `payload.data.byteLength` closes it. I'd update my position here if there's a threat model where `size` can't be steered by the caller.
+## Regression
 
-The same shape reaches `path/to/other.ts:LL` and isn't covered — fold it in here or split into a follow-up, your call. If you fold, the existing test scaffold makes a 50MB / 50MB+1B case straightforward.
+After applying this patch, `<the affected UI surface or flow>` fails — `<the user-visible symptom, exact error string if there is one>`. This breaks `<the broader user flow that depends on it>`, even for `<the role that still should have access>`.
+
+**Why:** `<the route or function>` is used by `<the calling surface>` to `<what it does>` — but the new guard at `path/to/file.ts:LL` rejects this case unconditionally because `<the assumption the guard makes that doesn't hold here>`.
+
+**Repro:** `<concrete steps a reviewer can follow to see the regression>`.
+
+## Note on tooling
+
+Using AI to draft patches is welcome — but please install Bun and **exercise the change in a running app** before opening the PR. Static checks don't catch UX regressions like this one, and the PR description noted you couldn't run `bun run check` locally. For security fixes especially, manual end-to-end verification is non-negotiable.
+
+Happy to pair on the fix or take it over if it's blocking you — just let me know.
+
+Could you take a look by May 25, 2026? If you can't respond by then, I'll close this PR as auto-stale per [Deadlines](#deadlines-and-auto-stale) — you can reopen anytime once you're back.
+```
+
+**Multi-class example — blockers, please-add items, and minor suggestions.** Use topic sections per class with `### N.` sub-issues for distinct findings inside each.
+
+````markdown
+Hi @contributor, thanks a lot for this PR — `<the specific thing they did well — the coverage, the pattern consistency, the threat model in the description>`. I audited the diff; a few items need to be addressed before this can be merged:
+
+## Blockers
+
+### 1. <One-line title naming the blocker — include file:line if it pins a specific site>
+
+```
+<Compiler error, test failure, or other concrete output that demonstrates the blocker, if there is one.>
+```
+
+<Prose explanation of the root cause, with file:line anchors. End with how you verified this is new to the branch ("I confirmed `main` is clean and this branch fails with the error above").>
+
+### 2. <One-line title for the second blocker>
+
+<Prose explanation of what's wrong, with file:line anchors. If a fix shape is non-obvious, suggest one or two options inline — "either treat X as Y at the backend, or send Z from the frontend.">
+
+## Please add to the PR description
+
+### <One-line title for the must-mention item>
+
+<Why this needs to be surfaced explicitly — usually a migration consequence, a behavioral change operators need to communicate, or a known limitation. Reference the section it should go under (`## Security impact`, `## Migration`, `## Notes`) and what operators or users need to do.>
+
+## Minor (optional, feel free to skip)
+
+- <Short observation about a redundant check, dead code path, or cosmetic issue — one sentence, with file:line if useful.>
+- <Another such observation, if applicable.>
+
+Could you take a look by May 25, 2026? If you can't respond by then, I'll close this PR as auto-stale per [Deadlines](#deadlines-and-auto-stale) — you can reopen anytime once you're back.
+````
+
+**Single-concern, single-class example — prose, no sections.** When the comment has only one concern and no process note to bundle, the section header just adds visual weight without scanning benefit.
+
+```markdown
+Hi @contributor — thanks for digging into this; `<the specific thing they did well — the threat model in the description, the audit instinct, the test scaffolding>` made the audit easy. One thing I'd like to talk through before merging.
+
+I don't think `<the issue the PR closes>` can actually happen in the current runtime. <Your reasoning with file:line anchors — the invariant the runtime already provides, the path you walked, why the threat model doesn't fit here.> What would flip my position: `<the concrete evidence or threat model that would make the fix necessary — a code path you might have missed, a deployment assumption that changes the calculus>`.
 
 Could you take a look by May 25, 2026? If you can't respond by then, I'll close this PR as auto-stale per [Deadlines](#deadlines-and-auto-stale) — you can reopen anytime once you're back.
 ```
@@ -255,15 +343,52 @@ If you've already asked the contributor to validate and you're now reconsidering
 The contributor identified a real gap; you're reshaping the fix, not rejecting the intent. The comment must include:
 
 - **Apology if you changed your mind** after the contributor already validated. Own the reversal explicitly; don't frame it as if the new pattern was always obvious.
-- **Why** the shape needs to change, with file/line references — auditable, not opinion.
-- **What you'll do instead** — branch name (per [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming)), scope, and confirmation that you'll credit the contributor in the replacement PR.
+- **Why** the shape needs to change, with file/line references — auditable, not opinion. If there are two or more distinct reasons, number them `### 1.`, `### 2.` inside a `## Why I'm closing` section so the contributor can refer to each individually.
+- **What you'll do instead** — branch name (per [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming)), scope, and confirmation that you'll credit the contributor in the replacement PR. Use a numbered list when the replacement spans multiple surfaces (backend + frontend + tests).
+
+Choose the body shape based on substance — see [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections).
+
+**Short close — single reason, narrow scope.** Prose throughout.
 
 ```markdown
 Thanks for spotting this gap @contributor — and I owe you an apology: I asked you to validate the earlier shape before I'd finished the audit, and now I'm reversing course on you. That's on me, not on the work you did here.
 
-Re-reading the codebase, size checks in this project sit at the transport boundary (`path/to/transport.ts:LL`, `path/to/other.ts:LL`) rather than per-call, and rebuilding on the per-call shape would mean rewriting most of the diff after we converge. So I'd rather close this as administrative housekeeping than ask you for another round.
+Re-reading the codebase, `<the concern this PR addresses>` is already handled at `<the established pattern's location — file:line anchors>` rather than `<where this PR put the fix>`, and rebuilding on this PR's shape would mean rewriting most of the diff after we converge. So I'd rather close this as administrative housekeeping than ask you for another round.
 
-I'll open `fix/<scope>-transport-limit` in the next day or two with `Co-authored-by:` crediting you — your instinct on the original gap is what makes the replacement possible, and that earns the attribution regardless of whose lines end up in the file. Reopen here anytime if it turns out we want per-call after all.
+I'll open `fix/<scope>-<short-description>` in the next day or two with `Co-authored-by:` crediting you — your instinct on the original gap is what makes the replacement possible, and that earns the attribution regardless of whose lines end up in the file. Reopen here anytime if it turns out `<the alternative shape>` makes sense after all.
+```
+
+**Substantive close — multiple reasons, multi-surface replacement.** Section the close into `## Why I'm closing` (with `### 1.` / `### 2.`) and `## What I'm doing instead` (numbered list of work items).
+
+```markdown
+Hi @contributor, my apologies — I've changed my mind after a deeper look at the diff together with `<the surrounding code or UI you re-audited>`. Thanks for running the end-to-end validation I asked for earlier; that part was done correctly. Closing this PR (not asking for changes) because the **scope and pattern** need to shift, and it's cleaner to land a fresh PR than to retrofit this one.
+
+## Why I'm closing
+
+`<Brief intro — "Two issues:", "Three reasons:", etc.>`
+
+### 1. <One-line title naming the first issue>
+
+<Prose explanation with file:line anchors. If the issue has sub-points that share the same root cause, enumerate them inline as bullets — for example, distinct routes or surfaces affected by the same over-restriction.>
+
+- `<sub-point 1>` — <why it matters>.
+- `<sub-point 2>` — <why it matters>.
+
+<Closing sentence that references the established pattern this PR diverges from, with file:line anchors so the contributor can see where the consistent shape already lives.>
+
+### 2. <One-line title naming the second issue>
+
+<Prose explanation. If the issue spans multiple surfaces — backend + frontend, server + client — name each one with file:line anchors so the contributor knows the full scope.>
+
+## What I'm doing instead
+
+I'll open `fix/<scope>-<short-description>` in the next day or two with `Co-authored-by:` crediting you. Scope:
+
+1. **<Surface 1, e.g. "Backend">** — <what changes and how it aligns with the established pattern>.
+2. **<Surface 2, e.g. "Frontend — <specific area>">** — <what changes>.
+3. **<Surface 3, if applicable>** — <what changes and any guard/visibility rule>.
+
+Sorry again for the back-and-forth — the right pattern only became obvious to me on the second review. The security intent of your PR was correct; we just need a different shape for the fix.
 ```
 
 #### Attribution in the replacement PR
@@ -304,12 +429,44 @@ Cross-cutting rules that apply across all review paths.
 
 - **Write all PR-facing text in English.** Review comments, suggested PR comments, suggested commit messages, suggested branch names, and anything else that lands on the PR page or in repo history must be in English — even when the maintainer-to-maintainer conversation (or maintainer-to-assistant conversation) is in another language. This applies symmetrically: if a contributor writes in another language, respond in English while keeping the tone warm. Per [CONTRIBUTING.md → Submitting Changes](./CONTRIBUTING.md#submitting-changes), the same rule applies to contributors.
 - **Post review comments via the GitHub PR UI**, not `gh pr comment`. Markdown previews and `@mention` notifications behave differently between the two — the CLI path silently drops or mangles formatting that the UI gets right. **Exception:** when execution is delegated to an AI assistant under [Suggest by Default; Act on Confirmation](#suggest-by-default-act-on-confirmation), the assistant uses `gh pr comment <PR-NUMBER> --body-file <path>` because passing a file preserves the markdown the assistant drafted; the maintainer then verifies rendering on the PR page.
-- **Match comment length to substance, but never strip the human out.** A two-line concern is a two-line comment. The opener — one or two sentences naming something specific the contributor did well (the security instinct, the test that pinned the boundary, the threat model) — is worth the space and lands far better than generic "thanks for the PR." Beyond that, restated context and "I want to merge this, but..." framing only hide the actual ask. End with the next step or deadline when one is needed.
-- **Write review comments as prose, not as documents.** Section headers (`## Summary`, `## Why`, `## Changes`, `## Notes`) belong in PR *descriptions*. A PR *comment* is a conversation — numbered concerns with bolded leads make it feel like an audit verdict, even when the substance is correct. Anchor file:line references inline ("at `path/to/file.ts:LL`, X happens — is there a reason...") and weave "what would change my mind" into the sentence rather than into a separate heading.
-- **Use file:line references** when describing technical issues. The diff is the source of truth; pointing to it makes the comment auditable. But anchor them inside sentences, not as the start of bolded list items.
+- **Match comment shape and length to substance.** A two-line concern is a two-line prose comment; a multi-class review (blockers + minor + please-add) gets `## Topic` sections so reviewers can scan; a substantial Path B follow-up or Path E close gets full PR-description shape. See [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections) for the full pattern. Either way, open with one or two sentences naming something specific the contributor did well — generic "thanks for the PR" reads as filler; named appreciation lands. End with the next step or deadline when one is needed. Skip restated context and "I want to merge this, but..." padding.
+- **Use file:line references** when describing technical issues. The diff is the source of truth; pointing to it makes the comment auditable. Anchor them inside sentences in prose ("at `path/to/file.ts:LL`, X happens — is there a reason..."), or in the body of a `### N.` sub-issue under a topic section — not as the start of unrelated bolded list items.
 - **Resolve conflicts locally**, not in the GitHub web UI. Web-resolved merges drop signing and bypass local checks.
 - **Never use `--no-verify`** or otherwise skip pre-commit hooks. If a hook fails, fix the underlying issue.
 - **Don't link MAINTAINERS.md from PR comments.** This file is internal — external contributors can't act on its conventions, and linking it leaks process they aren't expected to follow. Reference [CONTRIBUTING.md](./CONTRIBUTING.md) (contributor-facing equivalent: `## Security impact` template, `After You Submit` for auto-stale window, etc.) or inline the policy in one sentence.
+
+### Comment Shape: Prose vs Sections
+
+A PR comment's form should match its substance. Three patterns, picked by what the comment is doing:
+
+**Prose** — one or two short paragraphs, no `##` section headers. Use for:
+
+- Path A approval (thanks + verification + merging).
+- Path D with a single concern in a single class (one regression, one design question, one missing piece).
+- Path C "merge as-is, follow-up incoming" notice.
+- Short reply, counter, or clarification.
+- Most contributor replies — agreeing with the audit, conceding a point, asking one follow-up question.
+
+**Topic sections** (`## <Topic Name>`) — use when:
+
+- The comment covers two or more distinct concern classes: `## Blockers`, `## Minor`, `## Please add to the PR description`, `## Note on tooling`, `## Regression`, etc. Each class gets its own `##` section so a reviewer skimming the PR knows where to look first.
+- Inside a section, when there are multiple sub-issues, number them with `### 1.`, `### 2.`, each with a one-line title that names the issue (`### 1. \`bun run check\` fails at \`path/to/file.ts:LL\``). The title is the landing spot; the body is the explanation.
+
+**PR-description shape** (`## Summary / ## Why / ## Changes / ## Security impact / ## Notes`, or `## Why I'm closing / ## What I'm doing instead`) — use when:
+
+- Path B post-push summary documents substantive multi-file additions. Mirror the PR-description shape so reviewers can scan what's now in the branch.
+- Path E close-and-replace lays out reasoning + replacement plan. `## Why I'm closing` (with `### 1.` / `### 2.` for multiple reasons) and `## What I'm doing instead` (numbered list when multi-surface).
+
+This is the canonical exception to "section headers belong in PR descriptions" — when the comment itself documents a substantial set of changes or a structural decision, the same scannable shape is the right one.
+
+**Either way:**
+
+- Open with one or two sentences that name something specific the contributor did well. Sections never replace the opener; they sit *after* it.
+- One issue per paragraph inside a section. File:line references inline in prose (`at \`path/to/file.ts:LL\`, X happens — is there a reason...`), not as the start of bolded list items.
+- Code blocks for repros, failure messages, before/after snippets where they help — but only when they help. A two-line error message inline reads cleaner than the same message wrapped in fences.
+- Skip restated context the contributor already knows. Skip "I want to merge this, but..." framing. Skip numbered audit-verdict lists with bolded leads (`**1. Issue:** ...`) — they read as a checklist handed down, not a conversation.
+
+**When in doubt,** ask whether a reviewer skimming the comment would benefit from labeled landing spots. If the body is short enough to read end-to-end, prose. If it has two or more distinct classes of concern, sections. If you're documenting substantive work or a structural close, PR-description shape.
 
 ### Suggest by Default; Act on Confirmation
 

@@ -275,7 +275,7 @@ Two cases:
 - **You pushed commits or expanded scope.** Open by recognizing the contributor's original work, then describe what you added in a short paragraph — the files touched and why. Reviewers will read the diff for details; the comment exists to orient them, not to mirror it.
 - **Reply, question, or counter.** Lead with one or two sentences that acknowledge something specific (the catch, the reasoning, the test scaffolding) — generic "thanks" reads as filler. Then raise concerns in prose, anchored to file:line inline. Long, templated comments hide the actual ask; warmth and brevity are not opposites.
 
-Paths and identifiers in backticks. `@username` for mentions.
+Paths and identifiers in backticks. `@username` for mentions. Dates as plain English (`May 25, 2026`), not ISO format.
 
 ---
 

@@ -197,7 +197,9 @@ Write it as prose — a Path D comment is a conversation with someone whose thin
 - An opener that recognizes something specific about the contributor's work. The instinct that surfaced the bug, the threat model they wrote, the test they pinned the boundary with — name it. "Thanks for the PR" with no specifics is filler.
 - Concerns anchored to file:line, raised conversationally. "At `path/to/file.ts:LL`, X happens — is there a reason..." reads as collaboration. A numbered list of bolded headings reads as an audit verdict.
 - The question whose answer would flip your position, woven into the relevant concern. If you can't articulate one, you've already decided — use [Path B](#path-b--iterate-on-the-branch) or [Path E](#path-e--close-and-replace).
-- A response deadline at the end. Without one, silence becomes drift.
+- A response deadline at the end. Without one, silence becomes drift. Write the date in plain English (`May 25, 2026`), not ISO (`2026-05-25`) — ISO dates read as machine output and pull the warmth out of the closing sentence.
+- Make the close-and-reopen consequence explicit, not euphemistic. *"If you can't respond by then, I'll close this PR as auto-stale — you can reopen anytime once you're back"* is clearer than *"happy to reopen the moment you're back"*, which buries the action and reads as if the close happens by itself.
+- If you flag adjacent out-of-scope surfaces and offer to take them on yourself, keep the technical flag and the ownership offer in separate paragraphs. The flag is audit signal; the offer is logistics — mixing them lets logistics bleed into the finding and reads as hedging.
 
 Skip section headers (`## Summary` etc. — those are for PR descriptions), restated context the contributor already knows, and "I want to merge this, but..." padding. Warmth and brevity are not opposites: a four-sentence prose comment with named appreciation lands better than ten bullet points with bolded leads.
 
@@ -208,7 +210,7 @@ The validator at `path/to/file.ts:LL` checks `payload.size`, but the write a few
 
 The same shape reaches `path/to/other.ts:LL` and isn't covered — fold it in here or split into a follow-up, your call. If you fold, the existing test scaffold makes a 50MB / 50MB+1B case straightforward.
 
-Could you take a look by YYYY-MM-DD? Otherwise it'll auto-stale per [Deadlines](#deadlines-and-auto-stale) — happy to reopen the moment you're back.
+Could you take a look by May 25, 2026? If you can't respond by then, I'll close this PR as auto-stale per [Deadlines](#deadlines-and-auto-stale) — you can reopen anytime once you're back.
 ```
 
 #### Deadlines and auto-stale

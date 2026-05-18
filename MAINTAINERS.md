@@ -52,7 +52,7 @@ These principles inform every decision in this guide. Cite them in a PR comment 
 - **Stay persuadable until you've decided.** If a comment raises concerns, it should also state what would change your mind. If you can't articulate that, you've already decided — pick a different path.
 - **Closure is administrative, not adversarial.** A closed PR can always be reopened. Frame closure as housekeeping with the door open, never as rejection.
 - **Attribution always.** Whether you build on a contributor's branch or close-and-replace, the original audit instinct still earns credit.
-- **Tone matters under disagreement.** Acknowledge effort first, state concerns with file/line references second, invite counterargument third.
+- **Warm, brief, substantive — in that order.** Open with one or two sentences that recognize something *specific* the contributor did well (the security instinct, the careful edge-case writeup, the test scaffolding). Generic "thanks for the PR" reads as filler; named appreciation lands. Then go straight to the audit findings in prose, anchored to file:line inline, invite counter, then stop. Multi-paragraph framing and "I want to merge this, but..." padding hide the ask — but so does cold, headerless terseness with no acknowledgement at all. Write the comment a senior engineer would feel respected receiving.
 
 ---
 
@@ -128,12 +128,12 @@ Worked examples use these placeholders: `@contributor`, `#NNN`, `path/to/file.ts
 Use when the audit is clean — no adjacent gaps, established patterns followed, scope appropriate, and tests are present where [CONTRIBUTING.md → Tests](./CONTRIBUTING.md#tests) requires them. Post a short approval comment, then proceed to [Merge](#4-merge).
 
 ```markdown
-Audit clean — checked adjacent call sites in `path/to/dir`, no similar gaps. Follows the existing `<pattern>` pattern (see `path/to/reference.ts:LL`). `bun run check` / `bun run lint` / `bun test` all green locally. Merging.
-
-Thanks @contributor!
+Thanks @contributor — nice catch on this one, and the `<specific thing they did well>` made the audit straightforward. Checked adjacent call sites in `path/to/dir` and they all follow the same shape, no gaps. `bun run check` / `bun run lint` / `bun test` green locally. Merging.
 ```
 
-For security-sensitive PRs, also note that the threat model in the description matches the diff (or summarize it yourself if the contributor didn't include one).
+The opener has to name something specific — the regression test that pinned the boundary, the choice to follow an existing pattern, the threat model in the description. "Thanks for the PR!" alone is filler.
+
+For security-sensitive PRs, also note that the threat model in the description matches the diff (or summarize it yourself in one sentence if the contributor didn't include one).
 
 ### Path B — Iterate on the Branch
 
@@ -164,38 +164,22 @@ Use `merge` (not `rebase`) when syncing with `main` to preserve the contributor'
 
 #### Post-push comment
 
-After the push, comment using the same `## Summary / ## Why / ## Changes / ## Notes` structure as [CONTRIBUTING.md → Pull Request Format](./CONTRIBUTING.md#pull-request-format). Optional headers (`## Security impact`, `## Test plan`) apply when relevant.
+Write the comment as prose — a PR comment is a conversation, not a document. The `## Summary / ## Why / ## Changes / ## Notes` structure belongs in PR *descriptions*, not in review comments. A short paragraph that names what you added and why is enough; reviewers will read the diff for the rest.
 
 ```markdown
-Hi @contributor, thanks for this contribution. I built on top of your commit with a few additional fixes — everything is pushed to this branch.
-
-## Summary
-Covers the two adjacent call sites the original commit didn't reach (`path/to/a.ts:LL`, `path/to/b.ts:LL`), plus a regression test for the boundary case.
-
-## Why
-Same DoS shape as the original target reached those endpoints too — see audit notes below. Wanted to land all three together so the protection is uniform.
-
-## Changes
-- `path/to/a.ts:LL` — apply `validateFoo` before write.
-- `path/to/b.ts:LL` — same, with comment on why post-expansion length is the right thing to check.
-- `path/to/foo.test.ts` — added boundary cases for the two new sites.
-
-## Notes
-- `bun run check`, `bun run lint`, `bun test` all pass clean.
-- 3 files changed, +X/-Y on top of your commit.
-- Branch synced with latest `main`.
+Thanks @contributor — your fix at `path/to/file.ts:LL` was the right shape, and spotting the boundary case was a good catch. Built on top with two adjacent call sites (`path/to/a.ts:LL`, `path/to/b.ts:LL`) that took the same shape, plus a regression test for the 50MB boundary so the next round can't regress quietly. `bun run check` / `lint` / `test` green, synced with `main`.
 ```
+
+If the additions are larger or touch unrelated areas, a couple more sentences are fine — but stay in prose. The bar is "the contributor can read this and immediately know what's now in their branch and why," not "every change has its own bullet."
 
 ### Path C — Merge As-Is, Follow-up PR
 
 Use when the audit surfaces issues that share a shape with this PR but live in different files/areas the contributor didn't sign up for. Don't expand the scope of the open PR — credit the find, merge what's ready, file the follow-up separately.
 
 ```markdown
-Audit clean for the in-scope changes — merging.
+Thanks @contributor — this is a clean fix, and surfacing the pattern is honestly the more valuable half of it. Merging as-is.
 
-While auditing I noticed two adjacent call sites with the same shape (`path/to/x.ts:LL`, `path/to/y.ts:LL`) that should get the same treatment, but they're outside what this PR signed up for. Filing a follow-up PR (`fix/<scope>-cover-adjacent-sites`, per [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming)) crediting this one for surfacing the pattern.
-
-Thanks @contributor!
+While auditing I noticed two adjacent call sites that take the same shape (`path/to/x.ts:LL`, `path/to/y.ts:LL`), but they're outside what this PR signed up for — so I'll open a follow-up (`fix/<scope>-cover-adjacent-sites`, per [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming)) and credit this PR for the find.
 ```
 
 In the follow-up PR description, link back under `## Related` so the trail is legible from both sides.
@@ -206,24 +190,25 @@ Use when concerns are substantive but the contributor may have context or reason
 
 **Defining trait:** you'd update your position if the contributor brought a stronger argument. If you can't articulate what would change your mind, you've already decided — use [Path B](#path-b--iterate-on-the-branch) or [Path E](#path-e--close-and-replace).
 
-#### Comment structure
+#### Comment shape
 
-1. **Acknowledge the work** in one line. The contributor put real time in; lead with that.
-2. **Approve the parts that are clearly right** with concrete next steps. The merge path should be visible to the contributor by the time they finish reading.
-3. **State concerns about the rest** with file/line references — auditable, not opinion. Frame as concerns ("I have some concerns", "would value your reasoning"); use definite framing only where you're certain.
-4. **Invite the counterargument explicitly.** Name the question that would change your mind — this is what distinguishes Path D from a soft close.
-5. **State the next step and a deadline.** Without a deadline the PR stalls; with one, silence becomes a decision.
+Write it as prose — a Path D comment is a conversation with someone whose thinking you're building on, not a checklist. Three things have to be there, but they belong woven into the writing, not stacked as bolded headings:
+
+- An opener that recognizes something specific about the contributor's work. The instinct that surfaced the bug, the threat model they wrote, the test they pinned the boundary with — name it. "Thanks for the PR" with no specifics is filler.
+- Concerns anchored to file:line, raised conversationally. "At `path/to/file.ts:LL`, X happens — is there a reason..." reads as collaboration. A numbered list of bolded headings reads as an audit verdict.
+- The question whose answer would flip your position, woven into the relevant concern. If you can't articulate one, you've already decided — use [Path B](#path-b--iterate-on-the-branch) or [Path E](#path-e--close-and-replace).
+- A response deadline at the end. Without one, silence becomes drift.
+
+Skip section headers (`## Summary` etc. — those are for PR descriptions), restated context the contributor already knows, and "I want to merge this, but..." padding. Warmth and brevity are not opposites: a four-sentence prose comment with named appreciation lands better than ten bullet points with bolded leads.
 
 ```markdown
-Hi @contributor, thanks for surfacing this — the validator module shape is the right call.
+Thanks @contributor — the threat model in the description is the kind of thinking that makes these reviews easy, and the regression test you added covers the right boundary. Two things I'd like to talk through before merging:
 
-I want to merge this, but the audit turned up two things I'd like your read on first:
+The validator at `path/to/file.ts:LL` checks `payload.size`, but the write a few lines down uses `payload.data` — a mismatched payload like `{ size: 1, data: <60MB Uint8Array> }` would slip past the limit. Is `payload.size` trusted by an earlier check I'm missing? If not, switching to `payload.data.byteLength` closes it. I'd update my position here if there's a threat model where `size` can't be steered by the caller.
 
-1. **`path/to/file.ts:LL` validates `payload.size`, but the bytes actually written are `payload.data`.** A mismatched payload (e.g. `{ size: 1, data: <60MB Uint8Array> }`) appears to bypass the limit. Is there a reason to trust the size field here? If you have a concrete threat model where this isn't reachable, I'd value the reasoning — otherwise we should validate `payload.data.byteLength`.
+The same shape reaches `path/to/other.ts:LL` and isn't covered — fold it in here or split into a follow-up, your call. If you fold, the existing test scaffold makes a 50MB / 50MB+1B case straightforward.
 
-2. **`path/to/other.ts:LL` (`<adjacent endpoint>`) takes the same content shape and isn't covered.** Could fold into this PR or split into its own — your call. If you bundle, please also add a regression test for the boundary case (50MB exactly + 50MB + 1 byte).
-
-The merge path is clear once we agree on (1). Please share your thoughts by YYYY-MM-DD. If we don't hear back by then I'll close this PR as auto-stale — you're welcome to reopen or resubmit whenever it's convenient.
+Could you take a look by YYYY-MM-DD? Otherwise it'll auto-stale per [Deadlines](#deadlines-and-auto-stale) — happy to reopen the moment you're back.
 ```
 
 #### Deadlines and auto-stale
@@ -263,17 +248,11 @@ The contributor identified a real gap; you're reshaping the fix, not rejecting t
 - **What you'll do instead** — branch name (per [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming)), scope, and confirmation that you'll credit the contributor in the replacement PR.
 
 ```markdown
-Hi @contributor — thanks for catching this gap, and apologies for the reversal: I asked for a validation pass on this approach earlier, but after re-reading the audit I think the shape needs to change rather than be patched.
+Thanks for spotting this gap @contributor — and I owe you an apology: I asked you to validate the earlier shape before I'd finished the audit, and now I'm reversing course on you. That's on me, not on the work you did here.
 
-## Why
+Re-reading the codebase, size checks in this project sit at the transport boundary (`path/to/transport.ts:LL`, `path/to/other.ts:LL`) rather than per-call, and rebuilding on the per-call shape would mean rewriting most of the diff after we converge. So I'd rather close this as administrative housekeeping than ask you for another round.
 
-The current approach centralizes size checks in a per-call validator, but the established pattern in this codebase for similar concerns sits at the transport boundary (see `path/to/transport.ts:LL`, `path/to/other.ts:LL`). Rebuilding on top of the per-call shape would mean rewriting most of the diff after we converge — easier to start fresh with the transport-layer pattern.
-
-## What I'll do instead
-
-I'll open `fix/<scope>-transport-limit` in the next day or two, using the established pattern. You'll be credited in the replacement PR (`Co-authored-by:` trailer + cross-link from the description) — the audit instinct here is what made the fix possible.
-
-Closing as administrative housekeeping; reopening is always available if we end up wanting the per-call approach after all.
+I'll open `fix/<scope>-transport-limit` in the next day or two with `Co-authored-by:` crediting you — your instinct on the original gap is what makes the replacement possible, and that earns the attribution regardless of whose lines end up in the file. Reopen here anytime if it turns out we want per-call after all.
 ```
 
 #### Attribution in the replacement PR
@@ -313,10 +292,12 @@ Extra discipline applies on top of the standard lifecycle:
 Cross-cutting rules that apply across all review paths.
 
 - **Post review comments via the GitHub PR UI**, not `gh pr comment`. Markdown previews and `@mention` notifications behave differently between the two — the CLI path silently drops or mangles formatting that the UI gets right. **Exception:** when execution is delegated to an AI assistant under [Suggest by Default; Act on Confirmation](#suggest-by-default-act-on-confirmation), the assistant uses `gh pr comment <PR-NUMBER> --body-file <path>` because passing a file preserves the markdown the assistant drafted; the maintainer then verifies rendering on the PR page.
-- **Lead with acknowledgement, end with next steps.** This holds whether you're approving, requesting changes, asking for discussion, or closing.
-- **Use file:line references** instead of free-form prose when describing technical issues. The diff is the source of truth; pointing to it makes the comment auditable.
+- **Match comment length to substance, but never strip the human out.** A two-line concern is a two-line comment. The opener — one or two sentences naming something specific the contributor did well (the security instinct, the test that pinned the boundary, the threat model) — is worth the space and lands far better than generic "thanks for the PR." Beyond that, restated context and "I want to merge this, but..." framing only hide the actual ask. End with the next step or deadline when one is needed.
+- **Write review comments as prose, not as documents.** Section headers (`## Summary`, `## Why`, `## Changes`, `## Notes`) belong in PR *descriptions*. A PR *comment* is a conversation — numbered concerns with bolded leads make it feel like an audit verdict, even when the substance is correct. Anchor file:line references inline ("at `path/to/file.ts:LL`, X happens — is there a reason...") and weave "what would change my mind" into the sentence rather than into a separate heading.
+- **Use file:line references** when describing technical issues. The diff is the source of truth; pointing to it makes the comment auditable. But anchor them inside sentences, not as the start of bolded list items.
 - **Resolve conflicts locally**, not in the GitHub web UI. Web-resolved merges drop signing and bypass local checks.
 - **Never use `--no-verify`** or otherwise skip pre-commit hooks. If a hook fails, fix the underlying issue.
+- **Don't link MAINTAINERS.md from PR comments.** This file is internal — external contributors can't act on its conventions, and linking it leaks process they aren't expected to follow. Reference [CONTRIBUTING.md](./CONTRIBUTING.md) (contributor-facing equivalent: `## Security impact` template, `After You Submit` for auto-stale window, etc.) or inline the policy in one sentence.
 
 ### Suggest by Default; Act on Confirmation
 

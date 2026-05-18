@@ -1,6 +1,6 @@
 # Contributing Guide
 
-Thanks for considering a contribution. This guide covers the development environment, code conventions, and the submission process. For the maintainer side (review paths, attribution, merge conventions), see [MAINTAINERS.md](./MAINTAINERS.md).
+Thanks for considering a contribution. This guide covers the development environment, code conventions, and the submission process — everything you need to open a PR.
 
 ---
 
@@ -268,13 +268,20 @@ Add only when relevant — empty headers add noise:
 
 ### Comments on Existing PRs
 
-When you add substantive context to a PR (additional commits, scope expansion, a regression caught in review), use the same `## Summary / ## Why / ## Changes / ## Notes` structure. Keep paths and identifiers in backticks. Use `@username` for mentions.
+A PR comment is a conversation, not a document — write it that way. Section headers (`## Summary / ## Why / ## Changes / ## Notes`) belong in PR *descriptions*, not in comments. Use prose.
+
+Two cases:
+
+- **You pushed commits or expanded scope.** Open by recognizing the contributor's original work, then describe what you added in a short paragraph — the files touched and why. Reviewers will read the diff for details; the comment exists to orient them, not to mirror it.
+- **Reply, question, or counter.** Lead with one or two sentences that acknowledge something specific (the catch, the reasoning, the test scaffolding) — generic "thanks" reads as filler. Then raise concerns in prose, anchored to file:line inline. Long, templated comments hide the actual ask; warmth and brevity are not opposites.
+
+Paths and identifiers in backticks. `@username` for mentions.
 
 ---
 
 ## After You Submit
 
-A maintainer will read the full diff and audit it before responding — full process in [MAINTAINERS.md](./MAINTAINERS.md). You can expect one of these responses:
+A maintainer will read the full diff and audit it before responding. You can expect one of these responses:
 
 | Response | What it means |
 |----------|---------------|
@@ -283,7 +290,7 @@ A maintainer will read the full diff and audit it before responding — full pro
 | Comment requesting discussion | Maintainer has concerns or wants to split scope. Default response window is 1 week — silence past the deadline closes the PR as auto-stale, and you can reopen at any time. |
 | Close with reshape | Approach needs to change. You'll be credited in the replacement PR — closure is administrative, not rejection. |
 
-If you disagree with feedback, push back with a concrete scenario, file/line reference, or counterargument. The maintainer guide explicitly invites this.
+If you disagree with feedback, push back with a concrete scenario, file/line reference, or counterargument — reviewers expect this and will update their position when warranted.
 
 ---
 

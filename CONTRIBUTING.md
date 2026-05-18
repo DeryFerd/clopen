@@ -1,6 +1,6 @@
 # Contributing Guide
 
-Thanks for considering a contribution. This guide covers the development environment, code conventions, and the submission process. For the maintainer side (review paths, attribution, merge conventions), see [MAINTAINERS.md](./MAINTAINERS.md).
+Thanks for considering a contribution. This guide covers the development environment, code conventions, and the submission process — everything you need to open a PR.
 
 ---
 
@@ -18,6 +18,7 @@ Thanks for considering a contribution. This guide covers the development environ
   - [Naming](#naming)
   - [Logging](#logging)
   - [Formatting](#formatting)
+  - [Tests](#tests)
 - [Submitting Changes](#submitting-changes)
   - [Branch Naming](#branch-naming)
   - [Commit Messages](#commit-messages)
@@ -150,13 +151,30 @@ debug.log('namespace', 'message', { data });
 
 Tabs, single quotes, semicolons. No Prettier enforcement — manual consistency.
 
+### Tests
+
+Add a `*.test.ts` file when the change introduces non-trivial logic where a regression would be silent or costly — validators, parsers, security checks, path resolution, anything with branching that isn't obvious by inspection. Place the test alongside the source: `foo.ts` → `foo.test.ts`. Use `bun:test`.
+
+Skip tests for changes that are inherently observable (UI tweaks, log strings, dependency bumps), trivial one-liners, or thin forwards of an already-tested function. If breaking the code would take more than a glance to notice, add a test.
+
+For security fixes, tests are expected — at minimum a case that fails before the patch and passes after. Cover the boundary explicitly (the exact value that should be rejected) and at least one happy path.
+
+```bash
+bun test path/to/file.test.ts   # single file
+bun test                        # full suite
+```
+
+Tests must pass before opening the PR.
+
 ---
 
 ## Submitting Changes
 
+All written content on the repository — branch names, commit messages, PR titles, PR descriptions, and PR comments — must be in **English**, regardless of the language you and the maintainers use elsewhere. This keeps the contribution trail readable across the project's audience.
+
 ### Branch Naming
 
-Format: `<type>/<description>` — lowercase, kebab-case, concise.
+Format: `<type>/<description>` — lowercase, kebab-case, concise. **Exactly one `/`**: the type, then the description. Nested paths are not allowed.
 
 | Type | Use |
 |------|-----|
@@ -166,6 +184,15 @@ Format: `<type>/<description>` — lowercase, kebab-case, concise.
 | `chore/` | Build, refactor, dependencies, miscellaneous |
 
 Examples: `feature/database-management`, `fix/websocket-connection`, `docs/maintainers-guide-restructure`.
+
+**Don't**:
+
+| Wrong | Why | Fix |
+|------|-----|-----|
+| `docs/maintainers/review-examples` | Two slashes — nested path | `docs/maintainers-review-examples` |
+| `Fix/Websocket-Connection` | Uppercase | `fix/websocket-connection` |
+| `fix/fix-the-websocket-connection-bug-that-happens-on-reconnect` | Verbose | `fix/websocket-reconnect` |
+| `feature/auth.middleware` | Non-kebab punctuation | `feature/auth-middleware` |
 
 ### Commit Messages
 
@@ -197,6 +224,8 @@ Before pushing each commit:
 - [ ] `bun run check` passes
 - [ ] `bun run lint` passes
 - [ ] `bun run build` works
+- [ ] `bun test` passes if any test file was added or modified
+- [ ] New non-trivial logic has a `*.test.ts` (see [Tests](#tests))
 - [ ] Commit message follows the format above
 - [ ] No `console.*` (use the `debug` module)
 - [ ] No sensitive data (tokens, credentials, internal URLs)
@@ -241,22 +270,29 @@ Add only when relevant — empty headers add noise:
 
 ### Comments on Existing PRs
 
-When you add substantive context to a PR (additional commits, scope expansion, a regression caught in review), use the same `## Summary / ## Why / ## Changes / ## Notes` structure. Keep paths and identifiers in backticks. Use `@username` for mentions.
+A PR comment is a conversation, not a document — write it that way. Section headers (`## Summary / ## Why / ## Changes / ## Notes`) belong in PR *descriptions*, not in comments. Use prose.
+
+Two cases:
+
+- **You pushed commits or expanded scope.** Open by recognizing the contributor's original work, then describe what you added in a short paragraph — the files touched and why. Reviewers will read the diff for details; the comment exists to orient them, not to mirror it.
+- **Reply, question, or counter.** Lead with one or two sentences that acknowledge something specific (the catch, the reasoning, the test scaffolding) — generic "thanks" reads as filler. Then raise concerns in prose, anchored to file:line inline. Long, templated comments hide the actual ask; warmth and brevity are not opposites.
+
+Paths and identifiers in backticks. `@username` for mentions. Dates as plain English (`May 25, 2026`), not ISO format.
 
 ---
 
 ## After You Submit
 
-Once your PR is open, a maintainer will read the full diff and audit it before responding. The audit checks for adjacent gaps the PR didn't address (similar bugs nearby) and adjacent patterns (whether an established pattern in the codebase already covers the case). See [MAINTAINERS.md](./MAINTAINERS.md) for the maintainer side of the process.
+A maintainer will read the full diff and audit it before responding. You can expect one of these responses:
 
-You can expect one of four responses:
+| Response | What it means |
+|----------|---------------|
+| Approve and merge | Audit was clean. |
+| Commits added to your branch | Maintainer extended your fix with adjacent changes and posted a summary. Pull before pushing anything new. |
+| Comment requesting discussion | Maintainer has concerns or wants to split scope. Default response window is 1 week — silence past the deadline closes the PR as auto-stale, and you can reopen at any time. |
+| Close with reshape | Approach needs to change. You'll be credited in the replacement PR — closure is administrative, not rejection. |
 
-- **Approve and merge** — the audit was clean.
-- **Commits added on your branch** — the maintainer extends your fix with adjacent changes and posts a summary comment. Pull the branch before pushing anything new.
-- **Comment requesting discussion** — the maintainer has concerns, or sees a part that could be split into a separate PR. There's usually a 1-week response window. Silence past the deadline closes the PR as auto-stale (you can reopen at any time).
-- **Close with reshape** — the approach needs to change in a way that's easier to start fresh. You'll be credited in the replacement PR. Closure is administrative, not rejection.
-
-If you disagree with feedback, push back — provide a concrete scenario, file/line reference, or counterargument. The maintainer side of the doc explicitly invites this.
+If you disagree with feedback, push back with a concrete scenario, file/line reference, or counterargument — reviewers expect this and will update their position when warranted.
 
 ---
 

@@ -2,6 +2,7 @@ import { dirname, extname, join } from 'path';
 import { stat as fsStat } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
+import { validateFileSize } from './file-size-limit';
 
 // Import Bun native functions and create wrappers for better API compatibility
 const { spawn } = Bun;
@@ -120,6 +121,10 @@ export async function writeFileOperation(filePath: string, content: string) {
 		throw new Error('Content must be a string');
 	}
 
+	// Validate content size before writing
+	const contentSize = Buffer.byteLength(content, 'utf8');
+	validateFileSize(contentSize);
+
 	try {
 		debug.log('file', 'Writing file:', { filePath, contentLength: content.length });
 		await Bun.write(filePath, content);
@@ -142,6 +147,8 @@ export async function createFileOperation(filePath: string, content: string = ''
 	if (!filePath) {
 		throw new Error('File path is required');
 	}
+
+	validateFileSize(Buffer.byteLength(content, 'utf8'));
 
 	try {
 		// Normalize path for Windows only
@@ -366,6 +373,10 @@ export async function uploadFileOperation(file: { name: string; type: string; si
 	if (!targetPath) {
 		throw new Error('Target path is required');
 	}
+
+	// Validate the actual byte length of the payload, not the client-supplied
+	// `file.size` field — a mismatched value would otherwise bypass the limit.
+	validateFileSize(file.data.byteLength);
 
 	try {
 		// Normalize target path for Windows only

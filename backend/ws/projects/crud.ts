@@ -21,6 +21,7 @@ import { terminalStreamManager } from '../../terminal/stream-manager';
 import { broadcastPresence } from '../projects/status';
 import { debug } from '$shared/utils/logger';
 import { requireProjectAccess } from '../access';
+import { disposeProjectEngines } from '../../engine';
 import { clearProjectPresence } from '../../project/status-manager';
 
 export const crudHandler = createRouter()
@@ -166,6 +167,9 @@ export const crudHandler = createRouter()
 		if (mode === 'full') {
 			const remainingUsers = projectQueries.getUserCountForProject(data.id);
 			if (remainingUsers === 0) {
+				await disposeProjectEngines(data.id).catch((err) => {
+					debug.warn('project', `Engine cleanup error during project delete:`, err);
+				});
 				clearProjectPresence(data.id);
 				projectQueries.deleteProject(data.id);
 			}

@@ -10,6 +10,7 @@ This document provides guidelines for Claude Code when working on the Clopen pro
 
 1. Identify which stage is currently being worked on
 2. Understand the specific task that needs to be completed
+3. **For PR-related tasks** (e.g., "review PR #123", "check PR X"), read `MAINTAINERS.md` first to understand the PR workflow, review process, and maintainer conventions
 
 ### During Coding
 

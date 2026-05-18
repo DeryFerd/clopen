@@ -4,12 +4,14 @@ import { invalidateUserSessions, getActiveSessionCountForUser } from './session-
 // Mock the ws module
 const mockGetConnectionsForUser = mock(() => [] as any[]);
 const mockClearAuthForConnections = mock(() => 0);
+const mockGetProjectChatSessions = mock(() => new Map());
 const mockEmitUser = mock(() => {});
 
 mock.module('$backend/utils/ws', () => ({
 	ws: {
 		getConnectionsForUser: mockGetConnectionsForUser,
 		clearAuthForConnections: mockClearAuthForConnections,
+		getProjectChatSessions: mockGetProjectChatSessions,
 		emit: {
 			user: mockEmitUser
 		}
@@ -20,6 +22,7 @@ describe('invalidateUserSessions', () => {
 	beforeEach(() => {
 		mockGetConnectionsForUser.mockClear();
 		mockClearAuthForConnections.mockClear();
+		mockGetProjectChatSessions.mockClear();
 		mockEmitUser.mockClear();
 	});
 

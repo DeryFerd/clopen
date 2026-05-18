@@ -26,8 +26,8 @@ export function invalidateUserSessions(userId: string): number {
 	const cleared = ws.clearAuthForConnections(connections);
 	debug.log('auth', `Invalidated ${cleared} session(s) for user ${userId}`);
 
-	// Notify the specific user's connections to force logout
-	ws.emit.global('auth:force-logout-user', { userId, reason: 'Project access revoked' });
+	// Notify only this user's active connections to force logout.
+	ws.emit.user(userId, 'auth:force-logout-user', { reason: 'Project access revoked' });
 
 	return cleared;
 }

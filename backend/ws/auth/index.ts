@@ -21,7 +21,6 @@ export const authRouter = createRouter()
 	}))
 	// Declare auth:force-logout-user event (emitted when a specific user's sessions should be invalidated)
 	.emit('auth:force-logout-user', t.Object({
-		userId: t.String(),
 		reason: t.String()
 	}))
 	// Declare auth:user-projects-changed event (broadcast on every assignment

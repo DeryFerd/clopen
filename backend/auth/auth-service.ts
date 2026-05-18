@@ -523,11 +523,7 @@ export function unassignProjectFromUser(userId: string, projectId: string): bool
 		return false;
 	}
 	projectQueries.removeUserProject(userId, projectId);
-
-	// Invalidate all active sessions for this user to enforce the access change
-	const { invalidateUserSessions } = require('./session-invalidation');
-	const clearedCount = invalidateUserSessions(userId);
-	debug.log('auth', `Project ${projectId} unassigned from user ${userId}, ${clearedCount} session(s) invalidated`);
+	debug.log('auth', `Project ${projectId} unassigned from user ${userId}`);
 
 	return true;
 }

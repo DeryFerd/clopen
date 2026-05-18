@@ -4,14 +4,14 @@ import { invalidateUserSessions, getActiveSessionCountForUser } from './session-
 // Mock the ws module
 const mockGetConnectionsForUser = mock(() => [] as any[]);
 const mockClearAuthForConnections = mock(() => 0);
-const mockEmitGlobal = mock(() => {});
+const mockEmitUser = mock(() => {});
 
 mock.module('$backend/utils/ws', () => ({
 	ws: {
 		getConnectionsForUser: mockGetConnectionsForUser,
 		clearAuthForConnections: mockClearAuthForConnections,
 		emit: {
-			global: mockEmitGlobal
+			user: mockEmitUser
 		}
 	}
 }));
@@ -20,7 +20,7 @@ describe('invalidateUserSessions', () => {
 	beforeEach(() => {
 		mockGetConnectionsForUser.mockClear();
 		mockClearAuthForConnections.mockClear();
-		mockEmitGlobal.mockClear();
+		mockEmitUser.mockClear();
 	});
 
 	test('clears auth on all connections for a user', () => {
@@ -32,6 +32,7 @@ describe('invalidateUserSessions', () => {
 		expect(cleared).toBe(3);
 		expect(mockGetConnectionsForUser).toHaveBeenCalledWith('user-123');
 		expect(mockClearAuthForConnections).toHaveBeenCalledWith(['conn1', 'conn2', 'conn3']);
+		expect(mockEmitUser).toHaveBeenCalledWith('user-123', 'auth:force-logout-user', { reason: 'Project access revoked' });
 	});
 
 	test('returns 0 when user has no active connections', () => {

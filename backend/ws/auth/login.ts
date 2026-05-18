@@ -139,13 +139,19 @@ export const loginHandler = createRouter()
 			const result = loginWithToken(data.token);
 
 			// Success — clear any rate limit record for this IP
-      if (isRateLimited) {
-        authRateLimiter.recordSuccess(ip);
-      }
+			if (isRateLimited) {
+				authRateLimiter.recordSuccess(ip);
+			}
 
-      auditLogQueries.logEvent({ userId: result.user.id, eventType: 'auth:login', eventDetails: `User ${result.user.name} logged in via ${tokenType} token`, ipAddress: ip });
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:login',
+				eventDetails: `User ${result.user.name} logged in via ${tokenType} token`,
+				ipAddress: ip
+			});
 
-      ws.setAuth(conn, result.user.id, result.user.role, result.tokenHash);
+			ws.setAuth(conn, result.user.id, result.user.role, result.tokenHash);
 
 			return {
 				user: result.user,
@@ -229,21 +235,27 @@ export const loginHandler = createRouter()
 	})
 
 	// Logout — clear session
-  .http('auth:logout', {
-    data: t.Object({}),
-    response: t.Object({ success: t.Boolean() })
-  }, async ({ conn }) => {
-    const state = ws.getConnectionState(conn);
-    const userId = state?.userId;
-    if (state?.sessionTokenHash) logout(state.sessionTokenHash);
-    ws.clearAuth(conn);
-    if (userId) {
-      auditLogQueries.logEvent({ userId, eventType: 'auth:logout', eventDetails: 'User logged out', ipAddress: ws.getRemoteAddress(conn) });
-    }
-    return { success: true };
-  })
+	.http('auth:logout', {
+		data: t.Object({}),
+		response: t.Object({ success: t.Boolean() })
+	}, async ({ conn }) => {
+		const state = ws.getConnectionState(conn);
+		const userId = state?.userId;
+		if (state?.sessionTokenHash) logout(state.sessionTokenHash);
+		ws.clearAuth(conn);
+		if (userId) {
+			auditLogQueries.logEvent({
+				userId,
+				actorUserId: userId,
+				eventType: 'auth:logout',
+				eventDetails: 'User logged out',
+				ipAddress: ws.getRemoteAddress(conn)
+			});
+		}
+		return { success: true };
+	})
 
-  // Regenerate Personal Access Token
+	// Regenerate Personal Access Token
 	.http('auth:regenerate-pat', {
 		data: t.Object({}),
 		response: t.Object({
@@ -256,19 +268,25 @@ export const loginHandler = createRouter()
 	})
 
 	// Logout all sessions (admin only — used when switching auth mode)
-  .http('auth:logout-all', {
-    data: t.Object({}),
-    response: t.Object({ count: t.Number() })
-  }, async ({ conn }) => {
-    const adminId = ws.getUserId(conn);
-    const count = logoutAllSessions();
-    ws.emit.global('auth:force-logout', { reason: 'Auth mode changed' });
-    ws.clearAllAuth();
-    auditLogQueries.logEvent({ userId: adminId, eventType: 'auth:logout-all', eventDetails: `Admin logged out all sessions (${count} sessions cleared)` });
-    return { count };
-  })
+	.http('auth:logout-all', {
+		data: t.Object({}),
+		response: t.Object({ count: t.Number() })
+	}, async ({ conn }) => {
+		const adminId = ws.getUserId(conn);
+		const count = logoutAllSessions();
+		ws.emit.global('auth:force-logout', { reason: 'Auth mode changed' });
+		ws.clearAllAuth();
+		auditLogQueries.logEvent({
+			userId: adminId,
+			actorUserId: adminId,
+			eventType: 'auth:logout-all',
+			eventDetails: `Admin logged out all sessions (${count} sessions cleared)`,
+			ipAddress: ws.getRemoteAddress(conn)
+		});
+		return { count };
+	})
 
-  // Update display name (authenticated user)
+	// Update display name (authenticated user)
 	.http('auth:update-name', {
 		data: t.Object({
 			newName: t.String({ minLength: 1 })

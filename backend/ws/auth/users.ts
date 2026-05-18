@@ -8,6 +8,7 @@ import {
 	unassignProjectFromUser
 } from '$backend/auth/auth-service';
 import { invalidateUserSessions } from '$backend/auth/session-invalidation';
+import { auditLogQueries } from '$backend/database/queries';
 import { ws } from '$backend/utils/ws';
 
 export const usersHandler = createRouter()
@@ -59,9 +60,17 @@ export const usersHandler = createRouter()
 		response: t.Object({
 			added: t.Boolean()
 		})
-	}, async ({ data }) => {
+	}, async ({ data, conn }) => {
+		const actorUserId = ws.getUserId(conn);
 		const added = assignProjectToUser(data.userId, data.projectId);
 		if (added) {
+			auditLogQueries.logEvent({
+				userId: data.userId,
+				actorUserId,
+				eventType: 'project:assigned',
+				eventDetails: `Project ${data.projectId} assigned to user ${data.userId}`,
+				ipAddress: ws.getRemoteAddress(conn)
+			});
 			ws.emit.global('auth:user-projects-changed', {
 				type: 'assigned',
 				userId: data.userId,
@@ -80,9 +89,18 @@ export const usersHandler = createRouter()
 		response: t.Object({
 			removed: t.Boolean()
 		})
-	}, async ({ data }) => {
+	}, async ({ data, conn }) => {
+		const actorUserId = ws.getUserId(conn);
 		const removed = unassignProjectFromUser(data.userId, data.projectId);
 		if (removed) {
+			invalidateUserSessions(data.userId);
+			auditLogQueries.logEvent({
+				userId: data.userId,
+				actorUserId,
+				eventType: 'project:unassigned',
+				eventDetails: `Project ${data.projectId} unassigned from user ${data.userId}`,
+				ipAddress: ws.getRemoteAddress(conn)
+			});
 			invalidateUserSessions(data.userId);
 			ws.emit.global('auth:user-projects-changed', {
 				type: 'unassigned',

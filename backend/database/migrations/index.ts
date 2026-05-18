@@ -250,7 +250,7 @@ export const migrations = [
 	},
 	{
 		id: '036',
-		description: 'Create auth audit log table',
+		description: migration036.description,
 		up: migration036.up,
 		down: migration036.down
 	}

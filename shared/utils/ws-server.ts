@@ -280,20 +280,20 @@ export class WSRouter<
 	private eventSchemas = new Map<string, TSchema>();
 
 	/** Optional auth middleware — called before every route handler */
-  private authMiddleware: ((conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>) | null = null;
-  private rateLimiter: ((conn: WSConnection, action: string) => boolean) | null = null;
+	private authMiddleware: ((conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>) | null = null;
+	private rateLimiter: ((conn: WSConnection, action: string) => boolean) | null = null;
 
-  constructor() {
-    this.registerContextHandler();
-  }
+	constructor() {
+		this.registerContextHandler();
+	}
 
-  setAuthMiddleware(fn: (conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>): void {
-    this.authMiddleware = fn;
-  }
+	setAuthMiddleware(fn: (conn: WSConnection, action: string) => Promise<{ allowed: boolean; error?: string }>): void {
+		this.authMiddleware = fn;
+	}
 
-  setRateLimiter(fn: (conn: WSConnection, action: string) => boolean): void {
-    this.rateLimiter = fn;
-  }
+	setRateLimiter(fn: (conn: WSConnection, action: string) => boolean): void {
+		this.rateLimiter = fn;
+	}
 
   /**
    * Register built-in ws:set-context handler
@@ -625,13 +625,13 @@ export class WSRouter<
 					return;
 				}
 			}
-            // ═══ END AUTH GATE ═══
+				// ═══ END AUTH GATE ═══
 
-            // ═══ RATE LIMIT GATE ═══
-            if (this.rateLimiter && !this.rateLimiter(conn, action)) {
-              return;
-            }
-            // ═══ END RATE LIMIT GATE ═══
+				// ═══ RATE LIMIT GATE ═══
+				if (this.rateLimiter && !this.rateLimiter(conn, action)) {
+					return;
+				}
+				// ═══ END RATE LIMIT GATE ═══
 
 			// Check if this is an HTTP route
 			const httpRoute = this.httpRoutes.get(action);

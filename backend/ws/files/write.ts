@@ -40,7 +40,7 @@ export const writeHandler = createRouter()
 			modified: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const filePath = requireFilePathAccess(conn, data.filePath);
+		const filePath = await requireFilePathAccess(conn, data.filePath);
 		debug.log('file', 'Write file operation:', {
 			filePath,
 			contentLength: data.content.length
@@ -61,7 +61,7 @@ export const writeHandler = createRouter()
 			modified: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const filePath = requireFilePathAccess(conn, data.filePath);
+		const filePath = await requireFilePathAccess(conn, data.filePath);
 		return await createFileOperation(filePath, data.content);
 	})
 
@@ -79,7 +79,7 @@ export const writeHandler = createRouter()
 		// Uses the shared guard so FolderBrowser can create candidate project
 		// folders outside any existing project, while still preventing writes
 		// inside another user's project.
-		const dirPath = requireSharedFilePathAccess(conn, data.dirPath);
+		const dirPath = await requireSharedFilePathAccess(conn, data.dirPath);
 		return await createDirectoryOperation(dirPath);
 	})
 
@@ -96,8 +96,8 @@ export const writeHandler = createRouter()
 			modified: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const oldPath = requireFilePathAccess(conn, data.oldPath);
-		const newPath = requireFilePathAccess(conn, data.newPath);
+		const oldPath = await requireFilePathAccess(conn, data.oldPath);
+		const newPath = await requireFilePathAccess(conn, data.newPath);
 		return await renameOperation(oldPath, newPath);
 	})
 
@@ -115,8 +115,8 @@ export const writeHandler = createRouter()
 			modified: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const sourcePath = requireFilePathAccess(conn, data.sourcePath);
-		const targetPath = requireFilePathAccess(conn, data.targetPath);
+		const sourcePath = await requireFilePathAccess(conn, data.sourcePath);
+		const targetPath = await requireFilePathAccess(conn, data.targetPath);
 		return await duplicateOperation(sourcePath, targetPath);
 	})
 
@@ -138,8 +138,8 @@ export const writeHandler = createRouter()
 			modified: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const targetPath = requireFilePathAccess(conn, data.targetPath);
-		requireFilePathAccess(conn, join(targetPath, data.file.name));
+		const targetPath = await requireFilePathAccess(conn, data.targetPath);
+		await requireFilePathAccess(conn, join(targetPath, data.file.name));
 		return await uploadFileOperation(data.file, targetPath);
 	})
 
@@ -154,7 +154,7 @@ export const writeHandler = createRouter()
 			path: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const filePath = requireFilePathAccess(conn, data.filePath);
+		const filePath = await requireFilePathAccess(conn, data.filePath);
 		return await deleteOperation(filePath, data.force);
 	})
 
@@ -171,7 +171,7 @@ export const writeHandler = createRouter()
 			path: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const dirPath = requireSharedFilePathAccess(conn, data.dirPath);
+		const dirPath = await requireSharedFilePathAccess(conn, data.dirPath);
 
 		const stats = await fsStat(dirPath);
 		if (!stats.isDirectory()) {
@@ -202,8 +202,8 @@ export const writeHandler = createRouter()
 			modified: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const oldPath = requireSharedFilePathAccess(conn, data.oldPath);
-		const newPath = requireSharedFilePathAccess(conn, data.newPath);
+		const oldPath = await requireSharedFilePathAccess(conn, data.oldPath);
+		const newPath = await requireSharedFilePathAccess(conn, data.newPath);
 
 		let oldStats;
 		try {

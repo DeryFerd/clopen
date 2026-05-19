@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
 
 import { projectQueries } from '../../database/queries/project-queries';
 import { ws } from '$backend/utils/ws';
@@ -6,9 +7,26 @@ import type { WSConnection } from '$shared/utils/ws-server';
 import type { Project } from '$shared/types/database/schema';
 import { requireProjectAccess } from '../access';
 
-function isPathInside(rootPath: string, candidatePath: string): boolean {
-	const root = resolve(rootPath);
-	const candidate = resolve(candidatePath);
+/**
+ * Resolve a path to its real (canonical) location, following symlinks.
+ * Falls back to `resolve()` if the path does not exist on disk.
+ */
+async function resolveRealPath(p: string): Promise<string> {
+	try {
+		return await realpath(p);
+	} catch {
+		return resolve(p);
+	}
+}
+
+/**
+ * Check whether candidatePath is inside rootPath, resolving symlinks on both
+ * sides so that a symlink inside a project root cannot escape to an external
+ * target.
+ */
+async function isPathInside(rootPath: string, candidatePath: string): Promise<boolean> {
+	const root = await resolveRealPath(rootPath);
+	const candidate = await resolveRealPath(candidatePath);
 	const rel = relative(root, candidate);
 	return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
 }
@@ -24,8 +42,8 @@ export function requireProjectPathAccess(conn: WSConnection, projectPath: string
 	return requireProjectAccess(conn, project.id);
 }
 
-export function requireFilePathAccess(conn: WSConnection, filePath: string): string {
-	const normalizedPath = resolve(filePath);
+export async function requireFilePathAccess(conn: WSConnection, filePath: string): Promise<string> {
+	const normalizedPath = await resolveRealPath(filePath);
 	if (ws.getRole(conn) === 'admin') {
 		return normalizedPath;
 	}
@@ -33,20 +51,21 @@ export function requireFilePathAccess(conn: WSConnection, filePath: string): str
 	const userId = ws.getUserId(conn);
 	const projects = projectQueries.getAllForUser(userId);
 
-	const hasAccess = projects.some((project) => isPathInside(project.path, normalizedPath));
-	if (!hasAccess) {
-		throw new Error('Access denied');
+	for (const project of projects) {
+		if (await isPathInside(project.path, normalizedPath)) {
+			return normalizedPath;
+		}
 	}
 
-	return normalizedPath;
+	throw new Error('Access denied');
 }
 
 // Picker-style guard: allow paths inside the user's accessible projects OR
 // outside every registered project. Rejects only when the path lives inside
 // another project the user cannot access. Used by FolderBrowser flows that
 // operate around / before a project exists.
-export function requireSharedFilePathAccess(conn: WSConnection, filePath: string): string {
-	const normalizedPath = resolve(filePath);
+export async function requireSharedFilePathAccess(conn: WSConnection, filePath: string): Promise<string> {
+	const normalizedPath = await resolveRealPath(filePath);
 	if (ws.getRole(conn) === 'admin') {
 		return normalizedPath;
 	}
@@ -57,9 +76,9 @@ export function requireSharedFilePathAccess(conn: WSConnection, filePath: string
 	// Without this, renaming/deleting `/foo` would break a project rooted at
 	// `/foo/bar` even though `/foo` itself is not "inside" any project.
 	for (const project of allProjects) {
-		const projectRoot = resolve(project.path);
+		const projectRoot = await resolveRealPath(project.path);
 		if (projectRoot === normalizedPath) continue; // equality is handled below
-		if (!isPathInside(normalizedPath, project.path)) continue;
+		if (await isPathInside(normalizedPath, project.path)) continue;
 		if (!projectQueries.userHasProject(userId, project.id)) {
 			throw new Error('Access denied');
 		}
@@ -69,8 +88,8 @@ export function requireSharedFilePathAccess(conn: WSConnection, filePath: string
 	// roots resolve to the inner one, not whichever the DB returns first.
 	let containing: { id: string; path: string } | null = null;
 	for (const project of allProjects) {
-		if (!isPathInside(project.path, normalizedPath)) continue;
-		const projectRoot = resolve(project.path);
+		if (!(await isPathInside(project.path, normalizedPath))) continue;
+		const projectRoot = await resolveRealPath(project.path);
 		if (!containing || projectRoot.length > resolve(containing.path).length) {
 			containing = project;
 		}
@@ -87,13 +106,13 @@ export function requireSharedFilePathAccess(conn: WSConnection, filePath: string
 	return normalizedPath;
 }
 
-export function filterAccessibleExpandedPaths(rootPath: string, expandedPaths?: Set<string>): Set<string> | undefined {
+export async function filterAccessibleExpandedPaths(rootPath: string, expandedPaths?: Set<string>): Promise<Set<string> | undefined> {
 	if (!expandedPaths) return undefined;
 	const filtered = new Set<string>();
 
 	for (const expandedPath of expandedPaths) {
-		if (isPathInside(rootPath, expandedPath)) {
-			filtered.add(resolve(expandedPath));
+		if (await isPathInside(rootPath, expandedPath)) {
+			filtered.add(await resolveRealPath(expandedPath));
 		}
 	}
 

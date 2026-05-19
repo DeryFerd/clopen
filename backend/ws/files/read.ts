@@ -89,7 +89,7 @@ export const readHandler = createRouter()
 				.filter(Boolean);
 			expandedPaths = new Set(paths);
 		}
-		expandedPaths = filterAccessibleExpandedPaths(projectPath, expandedPaths);
+		expandedPaths = await filterAccessibleExpandedPaths(projectPath, expandedPaths);
 
 		const fileTree = await buildFileTree(projectPath, 3, 0, expandedPaths);
 		return fileTree as any;
@@ -132,7 +132,7 @@ export const readHandler = createRouter()
 			: (data.path === '.' || data.path === '' ? process.cwd() : data.path);
 		const guardedPath = data.path === 'drives'
 			? 'drives'
-			: requireSharedFilePathAccess(conn, requestedPath);
+			: await requireSharedFilePathAccess(conn, requestedPath);
 		const result = await handlePathBrowsing(guardedPath);
 		return result;
 	})
@@ -156,7 +156,7 @@ export const readHandler = createRouter()
 			)
 		)
 	}, async ({ data, conn }) => {
-		const dirPath = requireFilePathAccess(conn, data.dir_path);
+		const dirPath = await requireFilePathAccess(conn, data.dir_path);
 		const result = await listDirectoryContents(dirPath);
 		return result;
 	})
@@ -176,7 +176,7 @@ export const readHandler = createRouter()
 			error: t.Optional(t.String())
 		})
 	}, async ({ data, conn }) => {
-		const filePath = requireFilePathAccess(conn, data.file_path);
+		const filePath = await requireFilePathAccess(conn, data.file_path);
 		const result = await readFileContents(filePath);
 		return result;
 	})
@@ -221,7 +221,7 @@ export const readHandler = createRouter()
 			contentType: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const path = requireFilePathAccess(conn, data.path);
+		const path = await requireFilePathAccess(conn, data.path);
 
 		// Read file as binary
 		const file = Bun.file(path);

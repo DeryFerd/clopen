@@ -93,7 +93,7 @@ export const usersHandler = createRouter()
 		const actorUserId = ws.getUserId(conn);
 		const removed = unassignProjectFromUser(data.userId, data.projectId);
 		if (removed) {
-			invalidateUserSessions(data.userId);
+			invalidateUserSessions(data.userId, data.projectId);
 			auditLogQueries.logEvent({
 				userId: data.userId,
 				actorUserId,

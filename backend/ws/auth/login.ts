@@ -40,7 +40,8 @@ export const loginHandler = createRouter()
 			expiresAt: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const result = createAdmin(data.name);
+		const ip = ws.getRemoteAddress(conn);
+		const result = createAdmin(data.name, { ipAddress: ip });
 
 		// Save authMode to system settings
 		const currentSettings = settingsQueries.get('system:settings');
@@ -79,7 +80,8 @@ export const loginHandler = createRouter()
 		settingsQueries.set('system:settings', JSON.stringify(parsed));
 
 		// Create or get default admin
-		const result = createOrGetNoAuthAdmin();
+		const ip = ws.getRemoteAddress(conn);
+		const result = createOrGetNoAuthAdmin({ ipAddress: ip });
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -101,7 +103,8 @@ export const loginHandler = createRouter()
 			throw new Error('Auto-login is only available in no-auth mode');
 		}
 
-		const result = createOrGetNoAuthAdmin();
+		const ip = ws.getRemoteAddress(conn);
+		const result = createOrGetNoAuthAdmin({ ipAddress: ip });
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -136,7 +139,9 @@ export const loginHandler = createRouter()
 		}
 
 		try {
-			const result = loginWithToken(data.token);
+			const result = loginWithToken(data.token, {
+				ipAddress: ip
+			});
 
 			// Success — clear any rate limit record for this IP
 			if (isRateLimited) {
@@ -189,7 +194,9 @@ export const loginHandler = createRouter()
 		}
 
 		try {
-			const result = createUserFromInvite(data.inviteToken, data.name);
+			const result = createUserFromInvite(data.inviteToken, data.name, {
+				ipAddress: ip
+			});
 
 			authRateLimiter.recordSuccess(ip);
 

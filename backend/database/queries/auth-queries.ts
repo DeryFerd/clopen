@@ -18,6 +18,8 @@ export interface DBAuthSession {
 	expires_at: string;
 	created_at: string;
 	last_active_at: string;
+	ip_address: string | null;
+	user_agent: string | null;
 }
 
 export interface DBInviteToken {
@@ -106,15 +108,17 @@ export const authQueries = {
 	createSession(session: DBAuthSession): DBAuthSession {
 		const db = getDatabase();
 		db.prepare(`
-			INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, created_at, last_active_at)
-			VALUES (?, ?, ?, ?, ?, ?)
+			INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, created_at, last_active_at, ip_address, user_agent)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`).run(
 			session.id,
 			session.user_id,
 			session.token_hash,
 			session.expires_at,
 			session.created_at,
-			session.last_active_at
+			session.last_active_at,
+			session.ip_address ?? null,
+			session.user_agent ?? null
 		);
 		return db.prepare('SELECT * FROM auth_sessions WHERE id = ?').get(session.id) as DBAuthSession;
 	},
@@ -197,5 +201,14 @@ export const authQueries = {
 		const db = getDatabase();
 		const result = db.prepare('DELETE FROM auth_sessions').run() as { changes: number };
 		return result.changes;
+	},
+
+	getSessionsForUser(userId: string): DBAuthSession[] {
+		const db = getDatabase();
+		return db.prepare(`
+			SELECT * FROM auth_sessions
+			WHERE user_id = ? AND expires_at > datetime('now')
+			ORDER BY last_active_at DESC
+		`).all(userId) as DBAuthSession[];
 	}
 };

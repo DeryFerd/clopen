@@ -32,6 +32,11 @@ export interface SetupResult extends AuthResult {
 	personalAccessToken: string;
 }
 
+export interface SessionMeta {
+	ipAddress?: string;
+	userAgent?: string;
+}
+
 function toAuthUser(dbUser: { id: string; name: string; color: string; avatar: string; role: 'admin' | 'member'; created_at: string }): AuthUser {
 	return {
 		id: dbUser.id,
@@ -43,8 +48,8 @@ function toAuthUser(dbUser: { id: string; name: string; color: string; avatar: s
 	};
 }
 
-function createSessionForUser(userId: string, sessionDays?: number): { sessionToken: string; expiresAt: string; tokenHash: string } {
-	const days = sessionDays ?? DEFAULT_SESSION_DAYS;
+function createSessionForUser(userId: string, options?: { sessionDays?: number; ipAddress?: string; userAgent?: string }): { sessionToken: string; expiresAt: string; tokenHash: string } {
+	const days = options?.sessionDays ?? DEFAULT_SESSION_DAYS;
 	const sessionToken = generateSessionToken();
 	const tokenHash = hashToken(sessionToken);
 	const now = new Date().toISOString();
@@ -56,7 +61,9 @@ function createSessionForUser(userId: string, sessionDays?: number): { sessionTo
 		token_hash: tokenHash,
 		expires_at: expiresAt,
 		created_at: now,
-		last_active_at: now
+		last_active_at: now,
+		ip_address: options?.ipAddress ?? null,
+		user_agent: options?.userAgent ?? null
 	});
 
 	return { sessionToken, expiresAt, tokenHash };
@@ -109,12 +116,15 @@ export function isOnboardingComplete(): boolean {
  * Does not generate a PAT (not needed for no-auth).
  * If users already exist, returns the first admin.
  */
-export function createOrGetNoAuthAdmin(): AuthResult {
+export function createOrGetNoAuthAdmin(meta?: SessionMeta): AuthResult {
 	// If users already exist, return the first admin
 	const existingUsers = authQueries.getAllUsers();
 	const existingAdmin = existingUsers.find(u => u.role === 'admin');
 	if (existingAdmin) {
-		const { sessionToken, expiresAt } = createSessionForUser(existingAdmin.id);
+		const { sessionToken, expiresAt } = createSessionForUser(existingAdmin.id, {
+			ipAddress: meta?.ipAddress,
+			userAgent: meta?.userAgent
+		});
 		debug.log('auth', `No-auth mode: reusing existing admin: ${existingAdmin.name} (${existingAdmin.id})`);
 		return {
 			user: toAuthUser(existingAdmin),
@@ -138,7 +148,10 @@ export function createOrGetNoAuthAdmin(): AuthResult {
 		created_at: now
 	});
 
-	const { sessionToken, expiresAt } = createSessionForUser(userId);
+	const { sessionToken, expiresAt } = createSessionForUser(userId, {
+		ipAddress: meta?.ipAddress,
+		userAgent: meta?.userAgent
+	});
 
 	debug.log('auth', `No-auth mode: created default admin: ${defaultName} (${userId})`);
 
@@ -153,7 +166,7 @@ export function createOrGetNoAuthAdmin(): AuthResult {
  * Create the first admin user (setup flow)
  * Only works when no users exist.
  */
-export function createAdmin(name: string): SetupResult {
+export function createAdmin(name: string, meta?: SessionMeta): SetupResult {
 	if (!needsSetup()) {
 		throw new Error('Setup already completed. Admin account exists.');
 	}
@@ -178,7 +191,10 @@ export function createAdmin(name: string): SetupResult {
 		created_at: now
 	});
 
-	const { sessionToken, expiresAt } = createSessionForUser(userId);
+	const { sessionToken, expiresAt } = createSessionForUser(userId, {
+		ipAddress: meta?.ipAddress,
+		userAgent: meta?.userAgent
+	});
 
 	debug.log('auth', `Admin account created: ${trimmedName} (${userId})`);
 
@@ -193,7 +209,7 @@ export function createAdmin(name: string): SetupResult {
 /**
  * Create a user from an invite token
  */
-export function createUserFromInvite(rawInviteToken: string, name: string): SetupResult {
+export function createUserFromInvite(rawInviteToken: string, name: string, meta?: SessionMeta): SetupResult {
 	const trimmedName = name.trim();
 	if (trimmedName.length === 0) {
 		throw new Error('Name cannot be empty');
@@ -237,7 +253,10 @@ export function createUserFromInvite(rawInviteToken: string, name: string): Setu
 	// Increment invite use count
 	authQueries.incrementUseCount(invite.id);
 
-	const { sessionToken, expiresAt } = createSessionForUser(userId);
+	const { sessionToken, expiresAt } = createSessionForUser(userId, {
+		ipAddress: meta?.ipAddress,
+		userAgent: meta?.userAgent
+	});
 
 	debug.log('auth', `User created from invite: ${trimmedName} (${userId}), role: ${role}`);
 
@@ -252,7 +271,7 @@ export function createUserFromInvite(rawInviteToken: string, name: string): Setu
 /**
  * Login with a token (PAT or session token)
  */
-export function loginWithToken(token: string): AuthResult & { tokenHash: string } {
+export function loginWithToken(token: string, meta?: SessionMeta): AuthResult & { tokenHash: string } {
 	const tokenType = getTokenType(token);
 	const tokenHash = hashToken(token);
 
@@ -263,7 +282,10 @@ export function loginWithToken(token: string): AuthResult & { tokenHash: string 
 			throw new Error('Invalid access token');
 		}
 
-		const session = createSessionForUser(user.id);
+		const session = createSessionForUser(user.id, {
+			ipAddress: meta?.ipAddress,
+			userAgent: meta?.userAgent
+		});
 		debug.log('auth', `PAT login: ${user.name} (${user.id})`);
 
 		return {

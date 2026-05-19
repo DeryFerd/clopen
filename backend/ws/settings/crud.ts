@@ -9,10 +9,16 @@
 
 import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
-import { settingsQueries } from '../../database/queries';
+import { settingsQueries, projectQueries } from '../../database/queries';
 import { initializeEngine } from '../../engine';
 import { registerModels } from '$shared/constants/engines';
 import type { EngineType } from '$shared/types/unified';
+import {
+	getFileSizeLimitForProject,
+	setFileSizeLimitForProject,
+	DEFAULT_MAX_FILE_SIZE,
+	ABSOLUTE_MAX_FILE_SIZE
+} from '../../files/file-size-limit';
 
 export const crudHandler = createRouter()
 	// Get settings
@@ -112,4 +118,63 @@ export const crudHandler = createRouter()
 		const models = await engine.getAvailableModels();
 		registerModels(engineType, models);
 		return models;
+	})
+
+	// Get file size limit for a project
+	.http('settings:file-size-limit', {
+		data: t.Object({
+			projectId: t.String({ minLength: 1 })
+		}),
+		response: t.Object({
+			projectId: t.String(),
+			limitBytes: t.Number(),
+			limitMB: t.Number(),
+			isDefault: t.Boolean(),
+			defaultLimitBytes: t.Number(),
+			maxLimitBytes: t.Number()
+		})
+	}, async ({ data, conn }) => {
+		const project = projectQueries.getById(data.projectId);
+		if (!project) {
+			throw new Error('Project not found');
+		}
+
+		const limitBytes = getFileSizeLimitForProject(data.projectId);
+		return {
+			projectId: data.projectId,
+			limitBytes,
+			limitMB: Math.round(limitBytes / (1024 * 1024)),
+			isDefault: limitBytes === DEFAULT_MAX_FILE_SIZE,
+			defaultLimitBytes: DEFAULT_MAX_FILE_SIZE,
+			maxLimitBytes: ABSOLUTE_MAX_FILE_SIZE
+		};
+	})
+
+	// Set file size limit for a project (admin only)
+	.http('settings:set-file-size-limit', {
+		data: t.Object({
+			projectId: t.String({ minLength: 1 }),
+			limitBytes: t.Number({ minimum: 0 })
+		}),
+		response: t.Object({
+			projectId: t.String(),
+			limitBytes: t.Number(),
+			limitMB: t.Number(),
+			isDefault: t.Boolean()
+		})
+	}, async ({ data, conn }) => {
+		const project = projectQueries.getById(data.projectId);
+		if (!project) {
+			throw new Error('Project not found');
+		}
+
+		setFileSizeLimitForProject(data.projectId, data.limitBytes);
+		const newLimit = getFileSizeLimitForProject(data.projectId);
+
+		return {
+			projectId: data.projectId,
+			limitBytes: newLimit,
+			limitMB: Math.round(newLimit / (1024 * 1024)),
+			isDefault: newLimit === DEFAULT_MAX_FILE_SIZE
+		};
 	});

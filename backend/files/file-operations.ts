@@ -123,7 +123,7 @@ export async function writeFileOperation(filePath: string, content: string) {
 
 	// Validate content size before writing
 	const contentSize = Buffer.byteLength(content, 'utf8');
-	validateFileSize(contentSize);
+	validateFileSize(contentSize, filePath);
 
 	try {
 		debug.log('file', 'Writing file:', { filePath, contentLength: content.length });
@@ -148,7 +148,7 @@ export async function createFileOperation(filePath: string, content: string = ''
 		throw new Error('File path is required');
 	}
 
-	validateFileSize(Buffer.byteLength(content, 'utf8'));
+	validateFileSize(Buffer.byteLength(content, 'utf8'), filePath);
 
 	try {
 		// Normalize path for Windows only
@@ -376,14 +376,14 @@ export async function uploadFileOperation(file: { name: string; type: string; si
 
 	// Validate the actual byte length of the payload, not the client-supplied
 	// `file.size` field — a mismatched value would otherwise bypass the limit.
-	validateFileSize(file.data.byteLength);
+	// Pass the final file path so per-project limits can be resolved.
+	const normalizedTargetPath = process.platform === 'win32'
+		? targetPath.replace(/\//g, '\\')
+		: targetPath;
+	const finalPath = join(normalizedTargetPath, file.name);
+	validateFileSize(file.data.byteLength, finalPath);
 
 	try {
-		// Normalize target path for Windows only
-		const normalizedTargetPath = process.platform === 'win32' ?
-			targetPath.replace(/\//g, '\\') : targetPath;
-		const finalPath = join(normalizedTargetPath, file.name);
-
 		// Create parent directory if it doesn't exist
 		const targetDir = Bun.file(normalizedTargetPath);
 		if (!(await targetDir.exists())) {

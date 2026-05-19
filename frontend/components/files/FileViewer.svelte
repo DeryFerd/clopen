@@ -15,8 +15,9 @@
 	import type { editor } from 'monaco-editor';
 	import { debug } from '$shared/utils/logger';
 	import ws from '$frontend/utils/ws';
-	import { computeLineDiff } from '$frontend/utils/line-diff';
+	import { computeLineDiff, type GutterChange } from '$frontend/utils/line-diff';
 	import { gitStatusState } from '$frontend/stores/features/git-status.svelte';
+	import { settings } from '$frontend/stores/features/settings.svelte';
 	import { requestRevealFile } from '$frontend/stores/core/files.svelte';
 
 	// Interface untuk MonacoCodeEditor component
@@ -107,11 +108,30 @@
 
 	// Git gutter decorations + HEAD content cache
 	let gutterDecorations: string[] = [];
+	let gutterChanges: GutterChange[] = [];
 	let headContent = $state<string | null>(null);
 	let headContentForPath = '';
 	let pendingScrollRestore: number | null = null;
 	let scrollListenerDispose: (() => void) | null = null;
 	let gutterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+	let gutterClickDispose: (() => void) | null = null;
+	let activeDiffZone: {
+		id: string;
+		line: number;
+		escHandler: (e: KeyboardEvent) => void;
+		domNode: HTMLElement;
+		overlayWidget: editor.IOverlayWidget;
+		scrollDispose: () => void;
+		layoutDispose: () => void;
+		detachSwallow: () => void;
+	} | null = null;
+
+	// Monaco MouseTargetType.GUTTER_LINE_DECORATIONS — clicks on the colored bar
+	// land in the line-decorations strip (between line-numbers and content).
+	const GUTTER_LINE_DECORATIONS = 4;
+
+	// Monaco OverviewRulerLane.Right — places the marker in the scrollbar lane.
+	const OVERVIEW_RULER_RIGHT = 4;
 
 	// SVG view mode
 	let svgViewMode = $state<'visual' | 'code'>('visual');
@@ -213,6 +233,15 @@
 			if (gutterUpdateTimer) clearTimeout(gutterUpdateTimer);
 			scrollListenerDispose?.();
 			scrollListenerDispose = null;
+			gutterClickDispose?.();
+			gutterClickDispose = null;
+			if (activeDiffZone) {
+				window.removeEventListener('keydown', activeDiffZone.escHandler);
+				activeDiffZone.scrollDispose();
+				activeDiffZone.layoutDispose();
+				activeDiffZone.detachSwallow();
+				activeDiffZone = null;
+			}
 		};
 	});
 
@@ -326,35 +355,411 @@
 		}, 200);
 	}
 
+	function colorForChangeType(type: GutterChange['type']): string {
+		if (isDark) {
+			return type === 'added' ? '#047857' : type === 'modified' ? '#b45309' : '#b91c1c';
+		}
+		return type === 'added' ? '#10b981' : type === 'modified' ? '#f59e0b' : '#ef4444';
+	}
+
 	function updateGutterDecorations() {
 		const editor = monacoEditorRef?.getEditor();
 		if (!editor) return;
 
 		// No HEAD content (untracked, missing repo) — clear any existing gutter
 		if (headContent === null || headContent === undefined) {
+			gutterChanges = [];
 			gutterDecorations = editor.deltaDecorations(gutterDecorations, []);
+			closeDiffPeek();
 			return;
 		}
 
 		const changes = computeLineDiff(headContent, editableContent);
-		const newDecorations = changes.map((change) => ({
-			range: {
-				startLineNumber: change.startLine,
-				startColumn: 1,
-				endLineNumber: change.endLine,
-				endColumn: 1
-			},
-			options: {
-				isWholeLine: false,
-				linesDecorationsClassName:
-					change.type === 'added'
-						? 'git-gutter-added'
-						: change.type === 'modified'
-							? 'git-gutter-modified'
-							: 'git-gutter-deleted'
-			}
-		}));
+		gutterChanges = changes;
+
+		// Close any open peek whose anchor line is no longer marked as changed
+		if (activeDiffZone) {
+			const stillExists = changes.some(
+				(c) => activeDiffZone!.line >= c.startLine && activeDiffZone!.line <= c.endLine
+			);
+			if (!stillExists) closeDiffPeek();
+		}
+
+		const newDecorations = changes.map((change) => {
+			const color = colorForChangeType(change.type);
+			return {
+				range: {
+					startLineNumber: change.startLine,
+					startColumn: 1,
+					endLineNumber: change.endLine,
+					endColumn: 1
+				},
+				options: {
+					isWholeLine: false,
+					linesDecorationsClassName:
+						change.type === 'added'
+							? 'git-gutter-added'
+							: change.type === 'modified'
+								? 'git-gutter-modified'
+								: 'git-gutter-deleted',
+					overviewRuler: {
+						color,
+						position: OVERVIEW_RULER_RIGHT
+					}
+				}
+			};
+		});
 		gutterDecorations = editor.deltaDecorations(gutterDecorations, newDecorations);
+	}
+
+	function findChangeAtLine(line: number): GutterChange | null {
+		for (const change of gutterChanges) {
+			if (line >= change.startLine && line <= change.endLine) return change;
+		}
+		return null;
+	}
+
+	// Icon SVGs (inline so we can attach them to dynamically-created DOM nodes)
+	const ICON_CHEVRON_UP =
+		'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 10 8 5 13 10"/></svg>';
+	const ICON_CHEVRON_DOWN =
+		'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 8 11 13 6"/></svg>';
+	const ICON_CLOSE =
+		'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>';
+
+	// Buttons inside view zones must intercept pointerdown FIRST — Monaco's
+	// cursor-placement uses pointer events, which fire before mousedown, so
+	// stopping only mousedown lets Monaco still steal the click.
+	function attachPeekButton(btn: HTMLButtonElement, handler: () => void) {
+		const stop = (e: Event) => {
+			e.stopPropagation();
+			e.preventDefault();
+		};
+		btn.addEventListener('pointerdown', stop);
+		btn.addEventListener('mousedown', stop);
+		btn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			e.preventDefault();
+			handler();
+		});
+	}
+
+	function buildPeekDom(change: GutterChange): HTMLElement {
+		const root = document.createElement('div');
+		root.className = `git-diff-peek git-diff-peek-${change.type}`;
+
+		const inner = document.createElement('div');
+		inner.className = 'git-diff-peek-inner';
+		root.appendChild(inner);
+
+		if (change.oldLines.length > 0) {
+			const body = document.createElement('div');
+			body.className = 'git-diff-peek-body';
+			// Inner content track is sized to max-content so it widens past
+			// the body when any row's text overflows — that's what makes the
+			// body's overflow:auto produce a horizontal scrollbar. Block-level
+			// row children alone fill the body width and never trigger scroll.
+			const bodyContent = document.createElement('div');
+			bodyContent.className = 'git-diff-peek-body-content';
+			body.appendChild(bodyContent);
+			change.oldLines.forEach((line) => {
+				const row = document.createElement('div');
+				row.className = 'git-diff-peek-row';
+				// No line-number column here — line numbers render in the
+				// marginDomNode so the text aligns with the editor's content
+				// area below. Preserve indentation via white-space: pre.
+				row.textContent = line.length > 0 ? line : '\u00A0';
+				bodyContent.appendChild(row);
+			});
+			inner.appendChild(body);
+		} else {
+			const empty = document.createElement('div');
+			empty.className = 'git-diff-peek-empty';
+			empty.textContent = 'No previous content — these lines are new since the last commit.';
+			inner.appendChild(empty);
+		}
+
+		return root;
+	}
+
+	function buildPeekMargin(change: GutterChange): HTMLElement {
+		const margin = document.createElement('div');
+		margin.className = 'git-diff-peek-margin';
+
+		// padding-top on .git-diff-peek-margin reserves the header-row strip
+		// where the overlay widget sits, so the first line-number row aligns
+		// with the first body row on the content side.
+		change.oldLines.forEach((_, idx) => {
+			const row = document.createElement('div');
+			row.className = 'git-diff-peek-margin-row';
+			row.textContent = String(change.oldStartLine + idx);
+			margin.appendChild(row);
+		});
+
+		return margin;
+	}
+
+	// The peek's header is rendered as a Monaco overlay widget instead of
+	// inside the view zone's DOM. View zones split into two clipped trees
+	// (.margin and .monaco-scrollable-element) so a single in-zone header
+	// cannot physically span both columns. An overlay widget sits in
+	// .overlayWidgets — a sibling of those clipping containers — so it can
+	// span the full editor width as one continuous bar across the gutter
+	// and content.
+	function buildPeekOverlayHeader(
+		change: GutterChange,
+		index: number,
+		total: number
+	): HTMLElement {
+		const root = document.createElement('div');
+		root.className = `git-diff-peek-overlay-header git-diff-peek-overlay-header-${change.type}`;
+
+		const title = document.createElement('span');
+		title.className = 'git-diff-peek-overlay-title';
+		const fileName = file?.name ?? '';
+		title.textContent = `${fileName} · ${index} of ${total}`;
+		root.appendChild(title);
+
+		const actions = document.createElement('div');
+		actions.className = 'git-diff-peek-overlay-actions';
+
+		const prevBtn = document.createElement('button');
+		prevBtn.className = 'git-diff-peek-iconbtn';
+		prevBtn.type = 'button';
+		prevBtn.title = 'Previous change';
+		prevBtn.setAttribute('aria-label', 'Previous change');
+		prevBtn.innerHTML = ICON_CHEVRON_UP;
+		prevBtn.disabled = total <= 1;
+		attachPeekButton(prevBtn, () => navigatePeek(-1));
+		actions.appendChild(prevBtn);
+
+		const nextBtn = document.createElement('button');
+		nextBtn.className = 'git-diff-peek-iconbtn';
+		nextBtn.type = 'button';
+		nextBtn.title = 'Next change';
+		nextBtn.setAttribute('aria-label', 'Next change');
+		nextBtn.innerHTML = ICON_CHEVRON_DOWN;
+		nextBtn.disabled = total <= 1;
+		attachPeekButton(nextBtn, () => navigatePeek(1));
+		actions.appendChild(nextBtn);
+
+		const closeBtn = document.createElement('button');
+		closeBtn.className = 'git-diff-peek-iconbtn git-diff-peek-close';
+		closeBtn.type = 'button';
+		closeBtn.title = 'Close (Esc)';
+		closeBtn.setAttribute('aria-label', 'Close diff preview');
+		closeBtn.innerHTML = ICON_CLOSE;
+		attachPeekButton(closeBtn, () => closeDiffPeek());
+		actions.appendChild(closeBtn);
+
+		root.appendChild(actions);
+		return root;
+	}
+
+	function navigatePeek(direction: 1 | -1) {
+		if (!activeDiffZone || gutterChanges.length === 0) return;
+		const currentLine = activeDiffZone.line;
+		const currentIdx = gutterChanges.findIndex(
+			(c) => c.startLine === currentLine
+		);
+		if (currentIdx === -1) return;
+		const nextIdx =
+			(currentIdx + direction + gutterChanges.length) % gutterChanges.length;
+		const next = gutterChanges[nextIdx];
+		const editor = monacoEditorRef?.getEditor();
+		if (editor) editor.revealLineInCenter(next.startLine);
+		showDiffPeek(next);
+	}
+
+	function applyPeekSizing(editorInstance: editor.IStandaloneCodeEditor, domNode: HTMLElement) {
+		const layoutInfo = editorInstance.getLayoutInfo();
+		// Constrain peek width to the visible content viewport so the action
+		// buttons stay reachable when the source has long lines.
+		const fontSize = Math.round(settings.fontSize * 0.9);
+		const lineHeight = Math.round(fontSize * 1.5);
+		// Match the editor's tab width so leading tabs in the peek body align
+		// 1:1 with the editor's content above/below.
+		const tabSize = editorInstance.getModel()?.getOptions().tabSize ?? 2;
+		domNode.style.setProperty('--peek-viewport-width', `${layoutInfo.contentWidth}px`);
+		domNode.style.setProperty('--peek-font-size', `${fontSize}px`);
+		domNode.style.setProperty('--peek-line-height', `${lineHeight}px`);
+		domNode.style.setProperty('--peek-tab-size', String(tabSize));
+	}
+
+	function applyPeekScroll(domNode: HTMLElement, scrollLeft: number) {
+		// Cancel out the parent view-zone container's horizontal scroll so the
+		// peek stays anchored to the editor's visible left edge.
+		domNode.style.transform = `translateX(${scrollLeft}px)`;
+	}
+
+	function showDiffPeek(change: GutterChange) {
+		const editorInstance = monacoEditorRef?.getEditor();
+		if (!editorInstance) return;
+
+		closeDiffPeek();
+
+		const index = gutterChanges.indexOf(change) + 1;
+		const total = gutterChanges.length;
+		const domNode = buildPeekDom(change);
+		const marginDomNode = buildPeekMargin(change);
+		const overlayHeader = buildPeekOverlayHeader(change, index, total);
+		applyPeekSizing(editorInstance, domNode);
+		applyPeekScroll(domNode, editorInstance.getScrollLeft());
+
+		// Monaco attaches mouse/pointer listeners on its view container in
+		// capture phase, so a bubble-phase stopPropagation on the peek root
+		// fires *after* Monaco already received the event. Listen on document
+		// in capture phase instead — we run before any ancestor handler and
+		// only stop events whose target lies inside the peek. We deliberately
+		// don't capture click/dblclick: cursor positioning happens on
+		// mouse/pointer-down, while the peek's header buttons rely on click
+		// events reaching their handlers.
+		const swallowIfInside = (e: Event) => {
+			const target = e.target as Node | null;
+			if (
+				target &&
+				(domNode.contains(target) ||
+					marginDomNode.contains(target) ||
+					overlayHeader.contains(target))
+			) {
+				e.stopPropagation();
+			}
+		};
+		const captureEvents = ['pointerdown', 'pointerup', 'mousedown', 'mouseup'] as const;
+		for (const evt of captureEvents) {
+			document.addEventListener(evt, swallowIfInside, true);
+		}
+
+		// Wheel scrolling needs preventDefault too — stopPropagation alone
+		// blocks Monaco's listener, but the browser still natively bubbles
+		// the wheel up to Monaco's scrollable element, which scrolls the
+		// editor. Trap the event with preventDefault and drive the peek's
+		// own scroll programmatically so the body scrolls under the cursor
+		// instead of the editor below.
+		const bodyEl = domNode.querySelector<HTMLElement>('.git-diff-peek-body');
+		const wheelHandler = (e: WheelEvent) => {
+			const target = e.target as Node | null;
+			if (!target) return;
+			if (
+				!domNode.contains(target) &&
+				!marginDomNode.contains(target) &&
+				!overlayHeader.contains(target)
+			)
+				return;
+			e.stopPropagation();
+			e.preventDefault();
+			if (bodyEl) {
+				bodyEl.scrollLeft += e.deltaX;
+				bodyEl.scrollTop += e.deltaY;
+			}
+		};
+		document.addEventListener('wheel', wheelHandler, { capture: true, passive: false });
+
+		const detachSwallow = () => {
+			for (const evt of captureEvents) {
+				document.removeEventListener(evt, swallowIfInside, true);
+			}
+			document.removeEventListener('wheel', wheelHandler, true);
+		};
+
+		const afterLineNumber = Math.max(0, change.startLine - 1);
+		const fontSize = Math.round(settings.fontSize * 0.9);
+		const editorLineHeight = Math.round(fontSize * 1.5);
+		const HEADER_PX = 28;
+		const contentLines = change.oldLines.length;
+		const contentPx =
+			contentLines > 0 ? contentLines * editorLineHeight : editorLineHeight;
+		const heightInPx = HEADER_PX + contentPx + 6;
+
+		const widgetId = `git-diff-peek-overlay-${change.startLine}-${Date.now()}`;
+		const overlayWidget: editor.IOverlayWidget = {
+			getId: () => widgetId,
+			getDomNode: () => overlayHeader,
+			// Returning null lets us position the overlay manually via the
+			// view zone's onDomNodeTop callback, so the header stays glued to
+			// the top of the peek as the editor scrolls vertically.
+			getPosition: () => null
+		};
+		editorInstance.addOverlayWidget(overlayWidget);
+		// Hide until the view zone reports a valid top — avoids a frame of
+		// the overlay rendering at top:0 before Monaco lays out the zone.
+		overlayHeader.style.visibility = 'hidden';
+
+		let zoneId = '';
+		editorInstance.changeViewZones((accessor) => {
+			zoneId = accessor.addZone({
+				afterLineNumber,
+				heightInPx,
+				domNode,
+				marginDomNode,
+				suppressMouseDown: true,
+				onDomNodeTop: (top: number) => {
+					overlayHeader.style.top = `${top}px`;
+					overlayHeader.style.visibility = '';
+				}
+			});
+		});
+
+		const escHandler = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				e.stopPropagation();
+				closeDiffPeek();
+			}
+		};
+		window.addEventListener('keydown', escHandler);
+
+		const scrollDisposable = editorInstance.onDidScrollChange((e) => {
+			if (e.scrollLeftChanged) applyPeekScroll(domNode, e.scrollLeft);
+		});
+		const layoutDisposable = editorInstance.onDidLayoutChange(() => {
+			applyPeekSizing(editorInstance, domNode);
+		});
+
+		activeDiffZone = {
+			id: zoneId,
+			line: change.startLine,
+			escHandler,
+			domNode,
+			overlayWidget,
+			scrollDispose: () => scrollDisposable.dispose(),
+			layoutDispose: () => layoutDisposable.dispose(),
+			detachSwallow
+		};
+	}
+
+	function closeDiffPeek() {
+		if (!activeDiffZone) return;
+		const editorInstance = monacoEditorRef?.getEditor();
+		const { id, escHandler, scrollDispose, layoutDispose, detachSwallow, overlayWidget } =
+			activeDiffZone;
+		activeDiffZone = null;
+		window.removeEventListener('keydown', escHandler);
+		scrollDispose();
+		layoutDispose();
+		detachSwallow();
+		if (editorInstance) {
+			editorInstance.removeOverlayWidget(overlayWidget);
+			editorInstance.changeViewZones((accessor) => {
+				accessor.removeZone(id);
+			});
+		}
+	}
+
+	function attachGutterClickHandler(editorInstance: editor.IStandaloneCodeEditor) {
+		gutterClickDispose?.();
+		const disposable = editorInstance.onMouseDown((e) => {
+			if (e.target.type !== GUTTER_LINE_DECORATIONS) return;
+			const line = e.target.position?.lineNumber;
+			if (!line) return;
+			const change = findChangeAtLine(line);
+			if (!change) return;
+			if (activeDiffZone && activeDiffZone.line === change.startLine) {
+				closeDiffPeek();
+			} else {
+				showDiffPeek(change);
+			}
+		});
+		gutterClickDispose = () => disposable.dispose();
 	}
 
 	// Called by MonacoCodeEditor once the editor instance is fully constructed.
@@ -380,6 +785,17 @@
 		// Reset decoration ids — the prior editor instance is gone so its ids
 		// are no longer valid.
 		gutterDecorations = [];
+
+		// Previous editor's view zones are gone with the disposed instance
+		if (activeDiffZone) {
+			window.removeEventListener('keydown', activeDiffZone.escHandler);
+			activeDiffZone.scrollDispose();
+			activeDiffZone.layoutDispose();
+			activeDiffZone.detachSwallow();
+			activeDiffZone = null;
+		}
+
+		attachGutterClickHandler(editorInstance);
 
 		// Markdown mode-switch scroll restore takes precedence over the
 		// tab-switch absolute scroll restore.
@@ -411,6 +827,9 @@
 	function handleContentChange(newContent: string) {
 		hasChanges = newContent !== referenceContent;
 		onContentChange?.(newContent);
+		// User edits invalidate the captured HEAD-side hunk in the peek; close it
+		// so the next click reflects the up-to-date diff.
+		if (activeDiffZone) closeDiffPeek();
 		scheduleGutterUpdate();
 	}
 
@@ -736,7 +1155,9 @@
 										minimap: { enabled: false },
 										wordWrap: 'off',
 										renderWhitespace: 'none',
-										mouseWheelZoom: false
+										mouseWheelZoom: false,
+										overviewRulerLanes: 1,
+										overviewRulerBorder: false
 									}}
 								/>
 								{/key}
@@ -797,7 +1218,9 @@
 								minimap: { enabled: false },
 								wordWrap: wordWrap ? 'on' : 'off',
 								renderWhitespace: 'none',
-								mouseWheelZoom: false
+								mouseWheelZoom: false,
+								overviewRulerLanes: 1,
+								overviewRulerBorder: false
 							}}
 						/>
 						{/key}
@@ -824,6 +1247,13 @@
 
 <style>
 	/* Git gutter decorations — thin colored bars in the line-numbers margin */
+	:global(.git-gutter-added),
+	:global(.git-gutter-modified),
+	:global(.git-gutter-deleted) {
+		cursor: pointer;
+		transition: width 80ms ease, margin-left 80ms ease, filter 80ms ease;
+	}
+
 	:global(.git-gutter-added) {
 		background-color: #10b981;
 		width: 3px !important;
@@ -840,6 +1270,249 @@
 		border-top: 4px solid #ef4444;
 		border-right: 4px solid transparent;
 		height: 0 !important;
+	}
+
+	/* Dark mode — slightly darker so it doesn't glare against the editor bg */
+	:global(.dark .git-gutter-added) {
+		background-color: #059669;
+	}
+	:global(.dark .git-gutter-modified) {
+		background-color: #d97706;
+	}
+	:global(.dark .git-gutter-deleted) {
+		border-top-color: #dc2626;
+	}
+
+	/* Hover — widen the bar and brighten it slightly to signal clickability */
+	:global(.git-gutter-added:hover),
+	:global(.git-gutter-modified:hover) {
+		width: 6px !important;
+		margin-left: 1px;
+		filter: brightness(1.15);
+	}
+	:global(.git-gutter-deleted:hover) {
+		margin-left: 1px;
+		border-top-width: 6px;
+		border-right-width: 6px;
+		filter: brightness(1.15);
+	}
+
+	/* Narrow the overview ruler so the change markers align visually with the
+	   3px gutter bars. The canvas content scales to fit the CSS width. */
+	:global(.monaco-editor .decorationsOverviewRuler) {
+		width: 5px !important;
+	}
+
+	/* Monaco renders .view-zones, .view-overlays and .view-lines as siblings
+	   inside .lines-content. By default they all have z-index:auto and stack
+	   purely in DOM order — .view-zones is first, so its sibling layers paint
+	   above it and can swallow clicks before they reach the peek. Lifting
+	   .view-zones to z-index:1 (only when it actually contains a peek) puts
+	   the peek above those overlays without affecting editors with no peek. */
+	:global(.monaco-editor .view-zones:has(.git-diff-peek)) {
+		z-index: 1;
+	}
+
+	/* Inline diff peek view — VS Code-like presentation of the HEAD-side hunk.
+	   .git-diff-peek matches the full view-zone width (which can equal the
+	   source scrollWidth); .git-diff-peek-inner is constrained to the visible
+	   viewport so the action buttons remain reachable. */
+	:global(.git-diff-peek) {
+		position: relative;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+		pointer-events: auto;
+		-moz-tab-size: var(--peek-tab-size, 2);
+		tab-size: var(--peek-tab-size, 2);
+	}
+
+	:global(.git-diff-peek-inner) {
+		display: flex;
+		flex-direction: column;
+		width: var(--peek-viewport-width, 100%);
+		height: 100%;
+		font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', Consolas, 'Courier New',
+			monospace;
+		font-size: var(--peek-font-size, 12px);
+		background-color: #ffffff;
+		border-top: 1px solid #d4d4d4;
+		border-bottom: 1px solid #d4d4d4;
+		/* padding-top reserves space for the overlay-widget header that sits
+		   above the body; combined with the matching padding-top on the
+		   margin column, the body's first row and the margin's first row
+		   align at the same Y. */
+		padding-top: 28px;
+		overflow: hidden;
+		box-sizing: border-box;
+		pointer-events: auto;
+	}
+	:global(.dark .git-diff-peek-inner) {
+		background-color: #0d1117;
+		border-top-color: #30363d;
+		border-bottom-color: #30363d;
+	}
+
+	/* Merged peek header — a Monaco overlay widget positioned above the
+	   editor so it can span the gutter and content columns as one
+	   continuous bar (view zones split into two clipped DOM trees and
+	   cannot host a single full-width child). top is set imperatively by
+	   the view zone's onDomNodeTop callback. */
+	:global(.git-diff-peek-overlay-header) {
+		position: absolute;
+		left: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		box-sizing: border-box;
+		height: 29px;
+		padding: 0 8px 0 12px;
+		font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', Consolas, 'Courier New',
+			monospace;
+		font-size: 11px;
+		font-weight: 600;
+		color: #444;
+		background-color: #f3f3f3;
+		border-bottom: 1px solid #e0e0e0;
+		z-index: 5;
+		pointer-events: auto;
+	}
+	:global(.dark .git-diff-peek-overlay-header) {
+		color: #c9d1d9;
+		background-color: #161b22;
+		border-bottom-color: #30363d;
+	}
+
+	:global(.git-diff-peek-overlay-title) {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	:global(.git-diff-peek-overlay-actions) {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		margin-left: 8px;
+	}
+
+	:global(.git-diff-peek-iconbtn) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		padding: 0;
+		background: transparent;
+		border: none;
+		border-radius: 4px;
+		color: inherit;
+		cursor: pointer;
+		opacity: 0.65;
+		pointer-events: auto;
+		z-index: 1;
+	}
+	:global(.git-diff-peek-iconbtn:hover:not(:disabled)) {
+		background-color: rgba(0, 0, 0, 0.08);
+		opacity: 1;
+	}
+	:global(.dark .git-diff-peek-iconbtn:hover:not(:disabled)) {
+		background-color: rgba(255, 255, 255, 0.12);
+	}
+	:global(.git-diff-peek-iconbtn:disabled) {
+		opacity: 0.3;
+		cursor: default;
+	}
+
+	:global(.git-diff-peek-body) {
+		flex: 1;
+		min-width: 0;
+		overflow: auto;
+		background-color: rgba(248, 81, 73, 0.08);
+		color: #333;
+		/* Monaco sets user-select:none on the editor container, which inherits
+		   into the view zone and disables text highlighting inside the peek.
+		   Override here so the user can select diff text normally. */
+		-webkit-user-select: text;
+		user-select: text;
+		cursor: text;
+	}
+	:global(.dark .git-diff-peek-body) {
+		background-color: rgba(248, 81, 73, 0.14);
+		color: #e6edf3;
+	}
+
+	/* Content track inside the scroll viewport. width:max-content shrink-wraps
+	   to the widest row, min-width:100% keeps it at least as wide as the body
+	   so short rows still span full width for row hover/selection. */
+	:global(.git-diff-peek-body-content) {
+		display: block;
+		width: max-content;
+		min-width: 100%;
+	}
+
+	:global(.git-diff-peek-row) {
+		display: block;
+		white-space: pre;
+		line-height: var(--peek-line-height, 18px);
+		min-height: var(--peek-line-height, 18px);
+		/* No horizontal padding — the text must line up with the editor's
+		   content column above and below the peek. */
+	}
+
+	/* Margin area — Monaco places this in the gutter, so line numbers
+	   visually align with the editor's own line-number column above/below.
+	   padding-top reserves the strip where the overlay header sits, so the
+	   first line-number row aligns with the first body row on the content
+	   side. Top/bottom borders match .git-diff-peek-inner so the peek's
+	   frame is continuous across the gutter and content columns. */
+	:global(.git-diff-peek-margin) {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		height: 100%;
+		font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', Consolas, 'Courier New',
+			monospace;
+		font-size: var(--peek-font-size, 12px);
+		background-color: rgba(248, 81, 73, 0.08);
+		color: rgba(0, 0, 0, 0.4);
+		user-select: none;
+		overflow: hidden;
+		box-sizing: border-box;
+		pointer-events: auto;
+		border-top: 1px solid #d4d4d4;
+		border-bottom: 1px solid #d4d4d4;
+		padding-top: 28px;
+	}
+	:global(.dark .git-diff-peek-margin) {
+		background-color: rgba(248, 81, 73, 0.14);
+		color: rgba(255, 255, 255, 0.35);
+		border-top-color: #30363d;
+		border-bottom-color: #30363d;
+	}
+
+	:global(.git-diff-peek-margin-row) {
+		flex-shrink: 0;
+		line-height: var(--peek-line-height, 18px);
+		min-height: var(--peek-line-height, 18px);
+		padding-right: 10px;
+		text-align: right;
+	}
+
+	:global(.git-diff-peek-empty) {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		padding: 0 16px;
+		font-size: var(--peek-font-size, 12px);
+		font-style: italic;
+		color: rgba(0, 0, 0, 0.5);
+	}
+	:global(.dark .git-diff-peek-empty) {
+		color: rgba(255, 255, 255, 0.5);
 	}
 
 	:global(.line-highlight) {

@@ -1,5 +1,5 @@
 <!--
-  Rate Limit Banner
+  Rate Limit
   Static panel docked at the top of the AI Assistant chat (above TaskProgress).
   Shows every active engine rate-limit snapshot keyed by account, regardless
   of which project / session the user is currently viewing — rate limits are
@@ -14,6 +14,7 @@
 	} from '$frontend/stores/ui/rate-limit.svelte';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import ws from '$frontend/utils/ws';
+	import { slide } from 'svelte/transition';
 
 	const activeLimits = $derived.by(() => Object.values(rateLimitStore.byAccount));
 
@@ -37,10 +38,29 @@
 		});
 	}
 
+	function typeLabel(state: RateLimitState): string | null {
+		switch (state.rateLimitType) {
+			case 'five_hour':
+				return '5-hour session';
+			case 'seven_day':
+				return 'Weekly';
+			case 'seven_day_opus':
+				return 'Weekly · Opus';
+			case 'seven_day_sonnet':
+				return 'Weekly · Sonnet';
+			case 'overage':
+				return 'Overage';
+			default:
+				return null;
+		}
+	}
+
 	function headerLabel(state: RateLimitState): string {
+		const type = typeLabel(state);
+		const prefix = type ? `${type} rate limit` : 'Rate limit';
 		const base = isRejected(state)
-			? 'Rate limit reached'
-			: `Rate limit · ${percentUsed(state)}% used`;
+			? `${prefix} reached`
+			: `${prefix} · ${percentUsed(state)}% used`;
 		const reset = resetLabel(state);
 		return reset ? `${base} · Resets ${reset}` : base;
 	}
@@ -56,6 +76,7 @@
 
 {#each activeLimits as state (`${state.engine}:${state.accountId}`)}
 	<div
+		transition:slide={{ duration: 220 }}
 		class="shrink-0 border-b {isRejected(state)
 			? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900/60'
 			: 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/60'}"
@@ -81,7 +102,7 @@
 				onclick={() => handleDismiss(state)}
 				title="Dismiss"
 				aria-label="Dismiss rate limit banner"
-				class="shrink-0 rounded p-0.5 transition-colors {isRejected(state)
+				class="flex shrink-0 rounded p-0.5 transition-colors {isRejected(state)
 					? 'text-red-600/80 hover:bg-red-100 hover:text-red-700 dark:text-red-400/80 dark:hover:bg-red-900/40 dark:hover:text-red-300'
 					: 'text-amber-600/80 hover:bg-amber-100 hover:text-amber-700 dark:text-amber-400/80 dark:hover:bg-amber-900/40 dark:hover:text-amber-300'}"
 			>

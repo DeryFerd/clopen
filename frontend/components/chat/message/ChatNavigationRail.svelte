@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 
 	export interface NavItem {
@@ -12,10 +13,12 @@
 	interface Props {
 		scrollEl: HTMLElement | undefined;
 		items: NavItem[];
+		isUserAtBottom: boolean;
 		onJump: (item: NavItem) => void;
+		onJumpToBottom: () => void;
 	}
 
-	const { scrollEl, items, onJump }: Props = $props();
+	const { scrollEl, items, isUserAtBottom, onJump, onJumpToBottom }: Props = $props();
 
 	type HoverKey = string | 'up' | 'down' | null;
 	let hovered = $state<HoverKey>(null);
@@ -158,7 +161,10 @@
 		class="absolute right-3 lg:right-4 top-3 bottom-14 lg:bottom-16 w-8 pointer-events-none z-20 flex flex-col items-center justify-center"
 		aria-hidden="false"
 	>
-		<div class="relative pointer-events-auto">
+		<div
+			class="pointer-events-auto flex flex-col items-center rounded-full py-2 bg-white/30 dark:bg-slate-900/20 backdrop-blur-sm ring-1 ring-slate-200/40 dark:ring-slate-700/40 opacity-40 hover:opacity-100 transition-opacity duration-200"
+		>
+		<div class="relative">
 			<button
 				type="button"
 				onclick={goUp}
@@ -167,7 +173,7 @@
 				onfocus={() => (hovered = 'up')}
 				onblur={() => (hovered = null)}
 				disabled={!canGoUp}
-				class="p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+				class="flex p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
 				aria-label="Previous user message"
 			>
 				<Icon name="lucide:chevron-up" class="w-4 h-4" />
@@ -180,7 +186,7 @@
 		<div class="flex flex-col items-center gap-0.5 py-1.5">
 			{#each items as item, idx (item.messageId)}
 				{@const active = activeId === item.messageId}
-				<div class="relative pointer-events-auto">
+				<div class="relative">
 					<button
 						type="button"
 						onclick={() => jumpTo(item)}
@@ -194,7 +200,7 @@
 						<span
 							class="block h-px rounded-full transition-all duration-150
 								{active
-									? 'w-4 bg-slate-800 dark:bg-slate-100'
+									? 'w-4 bg-slate-600 dark:bg-slate-300'
 									: 'w-2 bg-slate-400 dark:bg-slate-500 group-hover:w-3 group-hover:bg-slate-600 dark:group-hover:bg-slate-300'}"
 						></span>
 					</button>
@@ -205,7 +211,7 @@
 			{/each}
 		</div>
 
-		<div class="relative pointer-events-auto">
+		<div class="relative">
 			<button
 				type="button"
 				onclick={goDown}
@@ -214,7 +220,7 @@
 				onfocus={() => (hovered = 'down')}
 				onblur={() => (hovered = null)}
 				disabled={!canGoDown}
-				class="p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+				class="flex p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
 				aria-label="Next user message"
 			>
 				<Icon name="lucide:chevron-down" class="w-4 h-4" />
@@ -223,5 +229,19 @@
 				{@render tooltip(downTarget)}
 			{/if}
 		</div>
+		</div>
 	</div>
+{/if}
+
+{#if !isUserAtBottom}
+	<button
+		type="button"
+		onclick={onJumpToBottom}
+		in:fade={{ duration: 150 }}
+		out:fade={{ duration: 100 }}
+		class="absolute right-3 lg:right-4 bottom-3 lg:bottom-4 z-30 flex items-center justify-center w-9 h-9 rounded-full bg-white/95 dark:bg-slate-700/95 backdrop-blur-sm ring-1 ring-slate-200 dark:ring-slate-600 shadow-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
+		aria-label="Scroll to bottom"
+	>
+		<Icon name="lucide:arrow-down" class="w-4 h-4" />
+	</button>
 {/if}

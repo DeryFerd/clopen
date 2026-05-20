@@ -450,12 +450,46 @@
 		const performScroll = () => {
 			const target = el.querySelector<HTMLElement>(`[data-message-id="${item.messageId}"]`);
 			if (target) {
-				target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				const top = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 24;
+				el.scrollTo({ top, behavior: 'auto' });
 			}
 		};
 
 		if (vs.isActive && (item.globalIndex < vs.windowStart || item.globalIndex >= vs.windowEnd)) {
 			vs.ensureVisible(item.globalIndex);
+			tick().then(() => {
+				requestAnimationFrame(performScroll);
+			});
+		} else {
+			performScroll();
+		}
+	}
+
+	function handleNavJumpToBottom() {
+		const el = getScrollEl();
+		if (!el || filteredMessages.length === 0) return;
+
+		const lastIndex = filteredMessages.length - 1;
+
+		// Re-scroll across frames: content-visibility'd items resolve their
+		// real height only after they come on-screen, growing scrollHeight.
+		const performScroll = () => {
+			scrollLockUntil = Date.now() + 600;
+			let attempts = 3;
+			const step = () => {
+				el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+				attempts--;
+				if (attempts > 0) {
+					requestAnimationFrame(step);
+				} else {
+					isUserAtBottom = true;
+				}
+			};
+			step();
+		};
+
+		if (vs.isActive && (lastIndex < vs.windowStart || lastIndex >= vs.windowEnd)) {
+			vs.ensureVisible(lastIndex);
 			tick().then(() => {
 				requestAnimationFrame(performScroll);
 			});
@@ -506,7 +540,9 @@
 		<ChatNavigationRail
 			scrollEl={messagesScrollEl}
 			items={userNavItems}
+			{isUserAtBottom}
 			onJump={handleNavJump}
+			onJumpToBottom={handleNavJumpToBottom}
 		/>
 	{/if}
 

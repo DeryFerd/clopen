@@ -13,6 +13,7 @@ export interface PtySession {
 	sessionId: string;
 	pty: IPty;
 	cwd: string;
+	userId: string;
 	projectId?: string;
 	createdAt: Date;
 	lastActivityAt: Date;
@@ -39,6 +40,7 @@ class PtySessionManager {
 	async createSession(
 		sessionId: string,
 		cwd: string,
+		userId: string,
 		projectId?: string,
 		terminalSize?: { cols: number; rows: number }
 	): Promise<PtySession> {
@@ -101,6 +103,7 @@ class PtySessionManager {
 			sessionId,
 			pty,
 			cwd,
+			userId,
 			projectId,
 			createdAt: new Date(),
 			lastActivityAt: new Date(),

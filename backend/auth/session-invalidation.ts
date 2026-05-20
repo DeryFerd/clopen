@@ -7,19 +7,28 @@
 
 import { ws } from '$backend/utils/ws';
 import { debug } from '$shared/utils/logger';
+import { ptySessionManager } from '$backend/terminal/pty-session-manager';
 
 /**
  * Invalidate all active WebSocket sessions for a specific user.
  * This clears their in-memory auth state and triggers a force-logout
  * event so the frontend knows to disconnect and re-authenticate.
  *
+ * Also kills any PTY terminal sessions belonging to the specified
+ * project to prevent orphaned processes from continuing to run
+ * after access is revoked.
+ *
  * @param userId - The user whose sessions should be invalidated
+ * @param projectId - Optional project ID to scope PTY cleanup
  * @returns The number of connections that were cleared
  */
-export function invalidateUserSessions(userId: string): number {
+export function invalidateUserSessions(userId: string, projectId?: string): number {
 	const connections = ws.getConnectionsForUser(userId);
 	if (connections.length === 0) {
 		debug.log('auth', `No active sessions to invalidate for user ${userId}`);
+		if (projectId) {
+			killUserPtySessionsForProject(userId, projectId);
+		}
 		return 0;
 	}
 
@@ -29,7 +38,32 @@ export function invalidateUserSessions(userId: string): number {
 	// Notify only this user's active connections to force logout.
 	ws.emit.user(userId, 'auth:force-logout-user', { reason: 'Project access revoked' });
 
+	if (projectId) {
+		killUserPtySessionsForProject(userId, projectId);
+	}
+
 	return cleared;
+}
+
+/**
+ * Kill PTY terminal sessions owned by a specific user in a project.
+ * Prevents orphaned shell processes from continuing to run after
+ * project access is revoked, without affecting other users' sessions.
+ */
+function killUserPtySessionsForProject(userId: string, projectId: string): void {
+	let killedCount = 0;
+
+	for (const session of ptySessionManager.getAllSessions()) {
+		if (session.projectId === projectId && session.userId === userId) {
+			debug.log('auth', `Killing PTY session ${session.sessionId} for user ${userId} (project ${projectId} access revoked)`);
+			ptySessionManager.killSession(session.sessionId, 'SIGKILL');
+			killedCount++;
+		}
+	}
+
+	if (killedCount > 0) {
+		debug.log('auth', `Killed ${killedCount} PTY session(s) for user ${userId} in project ${projectId}`);
+	}
 }
 
 /**

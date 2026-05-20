@@ -37,7 +37,7 @@ mock.module('../../database/queries/project-queries', () => ({
 	}
 }));
 
-const mockGetRole = mock(() => 'member' as const);
+const mockGetRole = mock((): 'admin' | 'member' => 'member');
 const mockGetUserId = mock(() => 'user-1');
 
 mock.module('$backend/utils/ws', () => ({

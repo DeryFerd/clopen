@@ -19,6 +19,7 @@ Internal guide for Clopen core maintainers. External contributors should follow 
   - [Path C — Merge As-Is, Follow-up PR](#path-c--merge-as-is-follow-up-pr)
   - [Path D — Comment and Wait](#path-d--comment-and-wait)
   - [Path E — Close and Replace](#path-e--close-and-replace)
+  - [Path F — Close as Not Actionable](#path-f--close-as-not-actionable)
 - [Security PRs](#security-prs)
 - [Communication Norms](#communication-norms)
   - [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections)
@@ -105,8 +106,9 @@ The audit is what determines the review path. Skipping it and going straight to 
 | Out-of-scope items found in the audit | [Path C — Merge As-Is, Follow-up PR](#path-c--merge-as-is-follow-up-pr) |
 | Concerns are substantive but you may be missing context, **or** part of the PR is mergeable while another part needs discussion | [Path D — Comment and Wait](#path-d--comment-and-wait) |
 | Structural approach needs to change, or you'd be rewriting most of the diff yourself | [Path E — Close and Replace](#path-e--close-and-replace) |
+| The PR's premise doesn't hold — the bug isn't real, the behavior is intentional, or the fix is worse than the issue — and no replacement is warranted | [Path F — Close as Not Actionable](#path-f--close-as-not-actionable) |
 
-The happy path ([Path A](#path-a--approve-and-merge)) is the goal — the other paths exist for when the audit surfaces something that warrants intervention. If you're unsure whether intervention is needed but lean toward "something feels off", default to [Path D](#path-d--comment-and-wait) — it preserves optionality without committing to a direction.
+The happy path ([Path A](#path-a--approve-and-merge)) is the goal — the other paths exist for when the audit surfaces something that warrants intervention. If you're unsure whether intervention is needed but lean toward "something feels off", default to [Path D](#path-d--comment-and-wait) — it preserves optionality without committing to a direction. Path F requires the opposite of Path D's defining trait: you must be able to articulate, with file:line evidence, *why* the premise doesn't hold. If you can't, you're in Path D territory, not Path F.
 
 ### 4. Merge
 
@@ -405,6 +407,94 @@ This creates two-way cross-links: the closed PR shows "Referenced in PR #MMM", a
 
 At squash-merge time, add a `Co-authored-by:` trailer to the squash commit body. This is the **only acceptable exception** to the "leave extended description empty" rule. See [`Co-authored-by` Trailer Format](#co-authored-by-trailer-format) for the strict format.
 
+### Path F — Close as Not Actionable
+
+Use when the audit reveals the PR's premise doesn't hold — the bug it claims to fix isn't reachable, the behavior it changes is intentional, the threat it hardens against doesn't apply, or the proposed fix would introduce more regressions than it closes — *and* there is no underlying issue worth chasing in a replacement PR. This is the close path of last resort: no merge, no iterate, no reshape.
+
+#### Path F vs Path D vs Path E
+
+The three close-leaning paths differ on **confidence** and **whether a replacement is warranted**:
+
+| | [Path D — Comment and Wait](#path-d--comment-and-wait) | [Path E — Close and Replace](#path-e--close-and-replace) | Path F — Close as Not Actionable |
+|---|---|---|---|
+| Maintainer confidence | "I might be wrong — what would change my mind?" | "I'm confident; the original gap is real but the shape needs to change" | "I'm confident; the original gap isn't real (or isn't worth closing)" |
+| Audit depth at decision time | Partial — concerns raised, contributor input may flip position | Complete — established pattern named, replacement scope scoped | Complete — premise walked end-to-end, file:line evidence in hand |
+| PR stays open during discussion? | Yes (with deadline + auto-stale) | No — closed immediately, replacement PR opens | No — closed immediately, no follow-up work |
+| Replacement work? | None (yet) | Yes — new branch, `Co-authored-by:` credit | None |
+| Reopen criterion | Contributor addresses concerns | Contributor brings a counter-pattern argument | Contributor brings concrete evidence the premise *does* hold (code path, deployment scenario, threat model) |
+
+**The Path D → Path F failure mode:** keeping a PR open under Path D with no articulable "what would change my mind" — i.e. you've already decided but you're using a softer path. This wastes the contributor's time. If you've completed the audit and the premise doesn't hold, close under Path F now; don't let a deadline-driven Path D drift into closure-by-silence.
+
+**The Path E → Path F failure mode:** opening a replacement PR you have no intention of actually shipping, just to soften the close. The contributor sees a stale branch with their name on it and reads the gesture for what it is. If you're not going to do the replacement work, use Path F honestly.
+
+#### Common situations
+
+This list is illustrative, not exhaustive. Use the audit, not pattern-matching against examples.
+
+1. **False-positive bug report.** PR claims to fix a race condition / null deref / leak that the audit shows can't reach the runtime path the PR modifies — usually because an upstream guard, type system invariant, or framework lifecycle already covers it.
+2. **Intentional behavior.** PR "fixes" a behavior that was deliberately designed that way, often with a load-bearing comment or test the contributor missed. Surface the original decision (`git blame`, the relevant test) in the close comment.
+3. **Misidentified threat model on a security PR.** PR hardens a route against an attacker class that doesn't have access to the precondition the attack requires — e.g. CSRF guard on a route already protected by `SameSite=Strict` cookies plus origin check, or auth check on a route already behind the project-membership middleware. Cite the existing guard with file:line.
+4. **Solution worse than the problem.** Even if the issue exists, the proposed fix introduces regressions whose blast radius exceeds the closed vector, *and* you don't have a cleaner alternative to suggest. Stating "no cleaner fix exists" is itself a position you should be able to defend — don't reach for Path F when you haven't done the alternative-shapes audit.
+5. **Conflicts with explicit project direction.** PR adds a feature, dependency, or pattern the project has decided against (link the decision: PR comment, CONTRIBUTING.md section, design doc). Refusing on direction grounds is legitimate but rare on a small project — most genuine direction conflicts should be caught upstream of a PR existing.
+
+#### Closing comment shape
+
+Path F comments have a higher accountability bar than the other paths because the contributor's work doesn't land *and* nothing replaces it. The comment must include:
+
+- **A warm, specific opener** — name the instinct, the careful writeup, the test scaffolding, whatever they did well. Generic "thanks for the PR" reads as filler; in a Path F close it reads as a brush-off.
+- **The premise the PR rests on**, stated as the contributor would state it. Showing them you understood the intent is the precondition for the close landing as auditable rather than dismissive.
+- **The audit-grounded reason the premise doesn't hold**, with file:line anchors to whatever invariant / existing guard / framework behavior makes the change unnecessary. *Auditable, not opinion.* If you can't anchor it, you haven't finished the audit — go back to Path D.
+- **What would change your mind** — the concrete evidence (a code path you might have missed, a deployment scenario that changes the calculus, a repro the audit couldn't produce) that would justify reopening. This is the same persuadability standard as Path D; it just lives in a closed PR.
+- **An explicit reopen invitation.** *"Reopen here anytime if `<the evidence>` shows up — I'd rather walk through it together than close the door."* Closure must read as administrative, not adversarial — per [Guiding Principles](#guiding-principles).
+
+No deadline, no auto-stale — the PR is already closed at comment time, so there's nothing to wait for.
+
+Choose the body shape based on substance — see [Comment Shape: Prose vs Sections](#comment-shape-prose-vs-sections). A single premise failure is prose. Multiple distinct premise failures (rare — usually a sign you should re-audit, since one of them is probably the real story) get `### 1.` / `### 2.` inside a `## Why I'm closing` section.
+
+**Single-premise example — prose throughout.**
+
+```markdown
+Hi @contributor, thanks for digging into this — `<the specific thing they did well: the threat model in the description, the test scaffolding, the audit instinct>` made the audit easy. Going to close this one, but I want to walk through why so it doesn't read as a brush-off.
+
+The premise is `<one-sentence restatement of the bug the PR claims to fix, in the contributor's framing>`. Re-reading `path/to/file.ts:LL` together with `path/to/guard.ts:LL`, that case can't reach the runtime — `<the invariant / existing guard / framework behavior that makes it unreachable, with the specific lines that establish it>`. The patched check at `path/to/pr-file.ts:LL` would fire for inputs that the upstream guard has already rejected, so the net effect is dead code on the hot path.
+
+What would change my mind: `<the concrete evidence — a request shape that bypasses the upstream guard, a deployment topology where the guard isn't in the path, a repro that produces the symptom on \`main\`>`. Reopen here anytime if any of that surfaces — I'd rather walk through it together than close the door.
+```
+
+**Multi-premise example — section per failure.** Use sparingly; if you find yourself writing more than two `### N.` blocks, re-audit before posting — Path F over-applied corrodes contributor trust.
+
+```markdown
+Hi @contributor, my apologies for the long read on this one — `<the specific thing they did well>` deserved a careful response, and I want to walk through why I'm closing rather than asking for changes.
+
+## Why I'm closing
+
+`<Brief intro: "Two reasons:", "The premise rests on two claims, neither of which holds:", etc.>`
+
+### 1. <One-line title naming the first premise failure>
+
+<Prose explanation with file:line anchors. Restate the contributor's claim in their framing, then walk the audit evidence that shows it doesn't hold.>
+
+### 2. <One-line title naming the second premise failure>
+
+<Same shape. If the two failures are independent, treat them separately; if they share a root cause, say so explicitly — that's usually a sign the audit should reframe to one premise, not two.>
+
+## What would change my mind
+
+- <Concrete evidence type 1 — code path, deployment scenario, threat model component>.
+- <Concrete evidence type 2>.
+
+Reopen here anytime if any of that surfaces. The instinct on `<the original observation that prompted the PR>` is still appreciated — it's how I'd want a contributor to flag something even when the eventual answer is "this doesn't reach the runtime."
+```
+
+#### When Path F is the wrong call
+
+Re-route to a different path if any of these apply:
+
+- **You're closing because the PR is small and you don't want to deal with it.** That's [Path B](#path-b--iterate-on-the-branch) territory — push the fix yourself and credit the contributor.
+- **You're closing because the PR is large and you don't want to deal with it.** That's [Path D](#path-d--comment-and-wait) territory if the issue is real, or [Path E](#path-e--close-and-replace) if you'll actually do the replacement. Volume of work is not a Path F reason.
+- **You haven't completed the audit but you have a strong prior.** Strong priors flip in audits — that's what audits are for. Finish the audit; if the prior holds, you'll have file:line anchors to cite, which is exactly what Path F requires.
+- **The PR is security-shaped and the threat model is *partly* plausible.** Partial plausibility is Path D, not Path F. Security PRs closed under Path F need an explicit walk of the threat model against the diff, line by line — see [Security PRs](#security-prs) for the bar.
+
 ---
 
 ## Security PRs
@@ -472,7 +562,7 @@ This is the canonical exception to "section headers belong in PR descriptions" �
 
 When you're contributing review work to a PR you are **not** personally merging — AI assistants, sub-reviewers doing first-pass triage, anyone whose output the merging maintainer will adopt — the audit response always ships with exactly two artifacts:
 
-1. **A suggested commit message** following [CONTRIBUTING.md → Commit Messages](./CONTRIBUTING.md#commit-messages). If a branch name needs to be proposed, follow [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming) exactly. Path D — *Comment and Wait* — has no maintainer commit, so omit this artifact and note that the existing PR title will serve as the squash subject if the contributor's revisions land.
+1. **A suggested commit message** following [CONTRIBUTING.md → Commit Messages](./CONTRIBUTING.md#commit-messages). If a branch name needs to be proposed, follow [CONTRIBUTING.md → Branch Naming](./CONTRIBUTING.md#branch-naming) exactly. Comment-only paths ([Path D — *Comment and Wait*](#path-d--comment-and-wait) and [Path F — *Close as Not Actionable*](#path-f--close-as-not-actionable)) have no maintainer commit, so omit this artifact. For Path D, note that the existing PR title will serve as the squash subject if the contributor's revisions land. For Path F, there is no squash subject because the PR is being closed.
 2. **A suggested PR comment** matching the chosen review path — start from the worked example in the relevant subsection of [Review Paths](#review-paths) and adapt to the actual diff.
 
 **Draft these inline with the audit; never ask permission to draft.** "Should I draft a comment?" is the wrong question — the artifacts are part of the deliverable, not a follow-up offer. Confirmation gates exist only for *acting* on the suggestion (Stage 1: editing the working tree; Stage 2: committing, pushing, posting). A draft that lives only in chat hasn't touched the repo and doesn't need a gate.
@@ -483,7 +573,7 @@ This separation keeps audit accountability with the person who has merge rights,
 
 #### Two-stage execution (when the maintainer delegates)
 
-If the maintainer wants the assistant to carry the suggestion through to the PR, the assistant must ask for explicit confirmation at **two** points. Each stage is a separate yes — a "yes" at stage 1 is **not** consent for stage 2. For Path D — where the deliverable is the PR comment alone with no code changes — Stage 1 doesn't apply; skip directly to Stage 2.
+If the maintainer wants the assistant to carry the suggestion through to the PR, the assistant must ask for explicit confirmation at **two** points. Each stage is a separate yes — a "yes" at stage 1 is **not** consent for stage 2. For comment-only paths — [Path D](#path-d--comment-and-wait) (open + comment + wait) and [Path F](#path-f--close-as-not-actionable) (close + comment + no follow-up) — where the deliverable is the PR comment alone with no code changes, Stage 1 doesn't apply; skip directly to Stage 2. For Path F, Stage 2 also includes `gh pr close <PR-NUMBER>` after the comment posts so the close and the reasoning land in the same maintainer action.
 
 **Stage 1 — Apply the fix.**
 After presenting the audit findings, ask: *"Should I apply the fix to the working tree?"*

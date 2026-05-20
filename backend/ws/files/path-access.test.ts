@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from 'bun:test';
-import { mkdir, symlink, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, symlink, writeFile, rm, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +15,7 @@ async function canCreateSymlinks(): Promise<boolean> {
 		await mkdir(targetPath, { recursive: true });
 		await symlink(targetPath, testPath, 'dir');
 		await rm(testPath);
-		await rm(targetPath);
+		await rm(targetPath, { recursive: true });
 		return true;
 	} catch {
 		return false;
@@ -58,8 +58,11 @@ let testDir: string;
 
 describe('path-access symlink resolution', () => {
 	beforeEach(async () => {
-		testDir = join(tmpdir(), `clopen-path-access-test-${randomUUID()}`);
-		await mkdir(testDir, { recursive: true });
+		const rawTestDir = join(tmpdir(), `clopen-path-access-test-${randomUUID()}`);
+		await mkdir(rawTestDir, { recursive: true });
+		// Canonicalize so test expectations match what resolveRealPath returns.
+		// macOS tmpdir lives under /var → /private/var, which realpath follows.
+		testDir = await realpath(rawTestDir);
 		mockGetRole.mockImplementation(() => 'member');
 		mockGetUserId.mockImplementation(() => 'user-1');
 	});

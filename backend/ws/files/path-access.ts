@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 
 import { projectQueries } from '../../database/queries/project-queries';
@@ -9,13 +9,18 @@ import { requireProjectAccess } from '../access';
 
 /**
  * Resolve a path to its real (canonical) location, following symlinks.
- * Falls back to `resolve()` if the path does not exist on disk.
+ * For non-existent paths, resolves the deepest existing ancestor and
+ * rejoins the unresolved tail so symlinked parent components are always
+ * followed even when the leaf doesn't exist yet.
  */
 async function resolveRealPath(p: string): Promise<string> {
+	const abs = resolve(p);
 	try {
-		return await realpath(p);
+		return await realpath(abs);
 	} catch {
-		return resolve(p);
+		const parent = dirname(abs);
+		if (parent === abs) return abs;
+		return join(await resolveRealPath(parent), basename(abs));
 	}
 }
 
@@ -78,7 +83,7 @@ export async function requireSharedFilePathAccess(conn: WSConnection, filePath: 
 	for (const project of allProjects) {
 		const projectRoot = await resolveRealPath(project.path);
 		if (projectRoot === normalizedPath) continue; // equality is handled below
-		if (await isPathInside(normalizedPath, project.path)) continue;
+		if (!(await isPathInside(normalizedPath, project.path))) continue;
 		if (!projectQueries.userHasProject(userId, project.id)) {
 			throw new Error('Access denied');
 		}

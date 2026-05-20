@@ -112,6 +112,7 @@ export const sessionHandler = createRouter()
 		const ptySession = await ptySessionManager.createSession(
 			sessionId,
 			cwd,
+			ws.getUserId(conn),
 			projectId || '',
 			{ cols, rows }
 		);

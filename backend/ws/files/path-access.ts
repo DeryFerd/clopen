@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 
 import { projectQueries } from '../../database/queries/project-queries';
@@ -9,18 +9,13 @@ import { requireProjectAccess } from '../access';
 
 /**
  * Resolve a path to its real (canonical) location, following symlinks.
- * For non-existent paths, resolves the deepest existing ancestor and
- * rejoins the unresolved tail so symlinked parent components are always
- * followed even when the leaf doesn't exist yet.
+ * Falls back to `resolve()` if the path does not exist on disk.
  */
 async function resolveRealPath(p: string): Promise<string> {
-	const abs = resolve(p);
 	try {
-		return await realpath(abs);
+		return await realpath(p);
 	} catch {
-		const parent = dirname(abs);
-		if (parent === abs) return abs;
-		return join(await resolveRealPath(parent), basename(abs));
+		return resolve(p);
 	}
 }
 

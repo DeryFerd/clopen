@@ -78,7 +78,7 @@ export async function requireSharedFilePathAccess(conn: WSConnection, filePath: 
 	for (const project of allProjects) {
 		const projectRoot = await resolveRealPath(project.path);
 		if (projectRoot === normalizedPath) continue; // equality is handled below
-		if (await isPathInside(normalizedPath, project.path)) continue;
+		if (!(await isPathInside(normalizedPath, project.path))) continue;
 		if (!projectQueries.userHasProject(userId, project.id)) {
 			throw new Error('Access denied');
 		}

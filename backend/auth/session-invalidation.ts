@@ -26,38 +26,47 @@ export function invalidateUserSessions(userId: string, projectId?: string): numb
 	const connections = ws.getConnectionsForUser(userId);
 	if (connections.length === 0) {
 		debug.log('auth', `No active sessions to invalidate for user ${userId}`);
-		if (projectId) {
-			killUserPtySessionsForProject(userId, projectId);
-		}
-		return 0;
+	} else {
+		const cleared = ws.clearAuthForConnections(connections);
+		debug.log('auth', `Invalidated ${cleared} session(s) for user ${userId}`);
 	}
-
-	const cleared = ws.clearAuthForConnections(connections);
-	debug.log('auth', `Invalidated ${cleared} session(s) for user ${userId}`);
 
 	// Notify only this user's active connections to force logout.
 	ws.emit.user(userId, 'auth:force-logout-user', { reason: 'Project access revoked' });
 
+	// Kill PTY sessions for the affected project to prevent orphaned
+	// processes from running after access is revoked.
 	if (projectId) {
 		killUserPtySessionsForProject(userId, projectId);
 	}
 
-	return cleared;
+	return connections.length;
 }
 
 /**
- * Kill PTY terminal sessions owned by a specific user in a project.
+ * Kill all PTY terminal sessions for a specific user and project.
  * Prevents orphaned shell processes from continuing to run after
- * project access is revoked, without affecting other users' sessions.
+ * project access is revoked.
  */
 function killUserPtySessionsForProject(userId: string, projectId: string): void {
+	const allSessions = ptySessionManager.getAllSessions();
 	let killedCount = 0;
 
-	for (const session of ptySessionManager.getAllSessions()) {
-		if (session.projectId === projectId && session.userId === userId) {
-			debug.log('auth', `Killing PTY session ${session.sessionId} for user ${userId} (project ${projectId} access revoked)`);
-			ptySessionManager.killSession(session.sessionId, 'SIGKILL');
-			killedCount++;
+	for (const session of allSessions) {
+		if (session.projectId === projectId) {
+			// Check if any connection for this user has this project as
+			// their current project context. If not, the user no longer
+			// has active access to this project's terminal.
+			const userConnections = ws.getConnectionsForUser(userId);
+			const hasProjectContext = userConnections.some(
+				(conn) => ws.getProjectId(conn) === projectId
+			);
+
+			if (!hasProjectContext) {
+				debug.log('auth', `Killing PTY session ${session.sessionId} for user ${userId} (project ${projectId} access revoked)`);
+				ptySessionManager.killSession(session.sessionId, 'SIGKILL');
+				killedCount++;
+			}
 		}
 	}
 

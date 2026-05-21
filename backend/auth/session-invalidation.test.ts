@@ -5,6 +5,7 @@ const mockGetConnectionsForUser = mock(() => [] as any[]);
 const mockClearAuthForConnections = mock(() => 0);
 const mockGetProjectChatSessions = mock(() => new Map());
 const mockEmitUser = mock(() => {});
+const mockGetProjectId = mock(() => undefined as string | undefined);
 
 const mockKillSession = mock(() => {});
 const mockGetAllSessions = mock(() => [] as Array<{
@@ -18,6 +19,7 @@ mock.module('$backend/utils/ws', () => ({
 		getConnectionsForUser: mockGetConnectionsForUser,
 		clearAuthForConnections: mockClearAuthForConnections,
 		getProjectChatSessions: mockGetProjectChatSessions,
+		getProjectId: mockGetProjectId,
 		emit: {
 			user: mockEmitUser
 		}
@@ -39,6 +41,8 @@ describe('invalidateUserSessions', () => {
 		mockEmitUser.mockClear();
 		mockKillSession.mockClear();
 		mockGetAllSessions.mockClear();
+		mockGetProjectId.mockClear();
+		mockGetProjectId.mockReturnValue(undefined);
 	});
 
 	test('clears auth on all connections for a user', () => {
@@ -62,22 +66,25 @@ describe('invalidateUserSessions', () => {
 		expect(cleared).toBe(0);
 	});
 
-	test('kills only PTY sessions owned by the revoked user in the project', () => {
+	test('kills all PTY sessions in project when user loses access (no project context)', () => {
 		mockGetConnectionsForUser.mockReturnValue(['conn1']);
 		mockClearAuthForConnections.mockReturnValue(1);
+		mockGetProjectId.mockReturnValue(undefined); // User has no active project context
 		mockGetAllSessions.mockReturnValue([
-			{ sessionId: 'alice-session', projectId: 'proj-1', userId: 'alice' },
 			{ sessionId: 'bob-session', projectId: 'proj-1', userId: 'bob' },
-			{ sessionId: 'bob-other', projectId: 'proj-2', userId: 'bob' }
+			{ sessionId: 'alice-session', projectId: 'proj-1', userId: 'alice' }
 		]);
 
 		invalidateUserSessions('bob', 'proj-1');
 
-		expect(mockKillSession).toHaveBeenCalledTimes(1);
+		// Should kill ALL sessions in proj-1 since user has no active project context
+		// (PTY sessions don't have userId, so we can't filter by owner)
+		expect(mockKillSession).toHaveBeenCalledTimes(2);
 		expect(mockKillSession).toHaveBeenCalledWith('bob-session', 'SIGKILL');
+		expect(mockKillSession).toHaveBeenCalledWith('alice-session', 'SIGKILL');
 	});
 
-	test('kills PTY sessions when user has no websocket connections but project access was revoked', () => {
+	test('kills all PTY sessions for project when user has no websocket connections', () => {
 		mockGetConnectionsForUser.mockReturnValue([]);
 		mockGetAllSessions.mockReturnValue([
 			{ sessionId: 'bob-session', projectId: 'proj-1', userId: 'bob' },
@@ -87,8 +94,8 @@ describe('invalidateUserSessions', () => {
 		const cleared = invalidateUserSessions('bob', 'proj-1');
 
 		expect(cleared).toBe(0);
-		expect(mockKillSession).toHaveBeenCalledTimes(1);
-		expect(mockKillSession).toHaveBeenCalledWith('bob-session', 'SIGKILL');
+		// Should kill all sessions in proj-1 since user has no connections (no project context)
+		expect(mockKillSession).toHaveBeenCalledTimes(2);
 	});
 });
 

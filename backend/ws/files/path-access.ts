@@ -9,13 +9,30 @@ import { requireProjectAccess } from '../access';
 
 /**
  * Resolve a path to its real (canonical) location, following symlinks.
- * Falls back to `resolve()` if the path does not exist on disk.
+ * If the path does not exist, resolves the parent directory and appends the filename.
+ * This ensures symlinks in the parent path are followed even when the leaf doesn't exist.
  */
 async function resolveRealPath(p: string): Promise<string> {
 	try {
 		return await realpath(p);
 	} catch {
-		return resolve(p);
+		// Path doesn't exist. Resolve parent directory (following symlinks) and append filename.
+		const { dirname, basename } = await import('node:path');
+		const parent = dirname(p);
+		const filename = basename(p);
+		
+		// If parent is the same as p (e.g., root directory), just resolve it
+		if (parent === p) {
+			return resolve(p);
+		}
+		
+		try {
+			const resolvedParent = await realpath(parent);
+			return resolve(resolvedParent, filename);
+		} catch {
+			// Parent also doesn't exist, fall back to resolve
+			return resolve(p);
+		}
 	}
 }
 

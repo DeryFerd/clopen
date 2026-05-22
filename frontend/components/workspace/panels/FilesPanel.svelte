@@ -47,7 +47,9 @@
 	import { settings } from '$frontend/stores/features/settings.svelte';
 	import { onMount, onDestroy } from 'svelte';
 	import ws from '$frontend/utils/ws';
+	import { authStore } from '$frontend/stores/features/auth.svelte';
 	import { showConfirm } from '$frontend/stores/ui/dialog.svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { getFileIcon } from '$frontend/utils/file-icon-mappings';
 	import { getGitStatusLabel, getGitStatusColor } from '$frontend/utils/git-status';
 	import type { IconName } from '$shared/types/ui/icons';
@@ -670,7 +672,10 @@
 		const movedNode: FileNode = { ...sourceNode, path: targetPath, name: newName };
 		const pathParts = targetPath.split(/[\\/]/);
 		pathParts.pop();
-		const parentPath = pathParts.length > 0 ? pathParts.join(targetPath.includes('\\') ? '\\' : '/') : null;
+		const computedParent = pathParts.length > 0 ? pathParts.join(targetPath.includes('\\') ? '\\' : '/') : null;
+		// Root nodes are stored at the top of the tree, not under a node whose
+		// path === projectPath. Map that case to `null` so addNodeToTree appends.
+		const parentPath = computedParent === projectPath ? null : computedParent;
 		return addNodeToTree(newTree, parentPath, movedNode);
 	}
 
@@ -819,77 +824,151 @@
 	}
 
 	// ============================
+	// Multi-Selection
+	// ============================
+
+	let selectedPaths = $state<Set<string>>(new Set());
+	let selectionAnchor = $state<string | null>(null);
+
+	// Flatten the tree into the order rows are rendered (DFS, only expanded
+	// folders' children), so shift-range can compute a contiguous slice.
+	function getVisiblePaths(): string[] {
+		const out: string[] = [];
+		const walk = (nodes: FileNode[]) => {
+			for (const n of nodes) {
+				out.push(n.path);
+				if (n.type === 'directory' && expandedFolders.has(n.path) && n.children) {
+					walk(n.children);
+				}
+			}
+		};
+		walk(projectFiles);
+		return out;
+	}
+
+	function selectRange(anchor: string, target: string) {
+		const visible = getVisiblePaths();
+		const i1 = visible.indexOf(anchor);
+		const i2 = visible.indexOf(target);
+		if (i1 === -1 || i2 === -1) {
+			selectedPaths = new Set([target]);
+			return;
+		}
+		const [a, b] = i1 < i2 ? [i1, i2] : [i2, i1];
+		selectedPaths = new Set(visible.slice(a, b + 1));
+	}
+
+	function handleNodeClick(file: FileNode, event: MouseEvent | KeyboardEvent) {
+		const ctrl = event.ctrlKey || event.metaKey;
+		const shift = event.shiftKey;
+
+		if (shift && selectionAnchor) {
+			selectRange(selectionAnchor, file.path);
+			return;
+		}
+		if (ctrl) {
+			const next = new Set(selectedPaths);
+			if (next.has(file.path)) {
+				next.delete(file.path);
+			} else {
+				next.add(file.path);
+			}
+			selectedPaths = next;
+			selectionAnchor = file.path;
+			return;
+		}
+
+		// Plain click: replace selection, then continue with normal open/toggle.
+		selectedPaths = new Set([file.path]);
+		selectionAnchor = file.path;
+		if (file.type === 'directory') {
+			handleFolderToggle(file.path);
+		} else {
+			handleFileSelect(file);
+		}
+	}
+
+	function clearSelection() {
+		selectedPaths = new Set();
+		selectionAnchor = null;
+	}
+
+	// Collect FileNodes for an action — operate on the multi-selection when
+	// the clicked node is part of a >1 selection, otherwise just the clicked
+	// node.
+	function getActionTargets(file: FileNode): FileNode[] {
+		if (selectedPaths.has(file.path) && selectedPaths.size > 1) {
+			return Array.from(selectedPaths)
+				.map((p) => findFileInTree(projectFiles, p))
+				.filter((n): n is FileNode => n !== null);
+		}
+		return [file];
+	}
+
+	// ============================
 	// Clipboard
 	// ============================
 
-	let clipboard = $state<{ file: FileNode; operation: 'copy' | 'cut' } | null>(null);
+	let clipboard = $state<{ files: FileNode[]; operation: 'copy' | 'cut' } | null>(null);
 
 	async function pasteFile(targetFolder: FileNode) {
 		if (!clipboard) return;
-		try {
-			const { file: sourceFile, operation } = clipboard;
-			let basePath: string;
-			if (targetFolder.type === 'directory') {
-				basePath = targetFolder.path;
-			} else {
+		const basePath = targetFolder.type === 'directory'
+			? targetFolder.path
+			: (() => {
 				const pathParts = targetFolder.path.split(/[\\/]/);
 				pathParts.pop();
-				basePath = pathParts.join(targetFolder.path.includes('\\') ? '\\' : '/');
-			}
-			const targetPath = generateUniqueFilename(basePath, sourceFile.name);
+				return pathParts.join(targetFolder.path.includes('\\') ? '\\' : '/');
+			})();
 
-			if (operation === 'copy') {
-				projectFiles = duplicateNodeInTree(projectFiles, sourceFile.path, targetPath);
-				if (targetFolder.type === 'directory' && !expandedFolders.has(targetFolder.path)) {
-					expandedFolders.add(targetFolder.path);
-					expandedFolders = new Set(expandedFolders);
-				}
-				await ws.http('files:duplicate', { sourcePath: sourceFile.path, targetPath });
-			} else if (operation === 'cut') {
-				projectFiles = moveNodeInTree(projectFiles, sourceFile.path, targetPath);
-				if (targetFolder.type === 'directory' && !expandedFolders.has(targetFolder.path)) {
-					expandedFolders.add(targetFolder.path);
-					expandedFolders = new Set(expandedFolders);
-				}
-				const savedClipboard = clipboard;
-				clipboard = null;
-				try {
-					await ws.http('files:rename', { oldPath: sourceFile.path, newPath: targetPath });
-				} catch (err) {
-					projectFiles = moveNodeInTree(projectFiles, targetPath, sourceFile.path);
-					clipboard = savedClipboard;
-					throw err;
-				}
-			}
-		} catch (error) {
-			debug.error('file', 'Failed to paste file:', error);
-			showErrorAlert(error instanceof Error ? error.message : 'Unknown error', 'Paste Failed');
-		}
+		await pasteToBase(basePath, targetFolder.type === 'directory' ? targetFolder.path : null);
 	}
 
 	async function pasteToRoot() {
 		if (!clipboard || !projectPath) return;
-		try {
-			const { file: sourceFile, operation } = clipboard;
-			const targetPath = generateUniqueFilename(projectPath, sourceFile.name);
+		await pasteToBase(projectPath, null);
+	}
 
-			if (operation === 'copy') {
-				projectFiles = duplicateNodeInTree(projectFiles, sourceFile.path, targetPath);
-				await ws.http('files:duplicate', { sourcePath: sourceFile.path, targetPath });
-			} else if (operation === 'cut') {
-				projectFiles = moveNodeInTree(projectFiles, sourceFile.path, targetPath);
-				const savedClipboard = clipboard;
-				clipboard = null;
-				try {
-					await ws.http('files:rename', { oldPath: sourceFile.path, newPath: targetPath });
-				} catch (err) {
-					projectFiles = moveNodeInTree(projectFiles, targetPath, sourceFile.path);
-					clipboard = savedClipboard;
-					throw err;
+	async function pasteToBase(basePath: string, expandFolder: string | null) {
+		if (!clipboard) return;
+		const { files: sourceFiles, operation } = clipboard;
+		const movedPairs: { from: string; to: string }[] = [];
+
+		try {
+			for (const sourceFile of sourceFiles) {
+				const targetPath = generateUniqueFilename(basePath, sourceFile.name);
+
+				if (operation === 'copy') {
+					projectFiles = duplicateNodeInTree(projectFiles, sourceFile.path, targetPath);
+					try {
+						await ws.http('files:duplicate', { sourcePath: sourceFile.path, targetPath });
+					} catch (err) {
+						projectFiles = removeNodeFromTree(projectFiles, targetPath);
+						throw err;
+					}
+				} else {
+					projectFiles = moveNodeInTree(projectFiles, sourceFile.path, targetPath);
+					try {
+						await ws.http('files:rename', { oldPath: sourceFile.path, newPath: targetPath });
+						movedPairs.push({ from: sourceFile.path, to: targetPath });
+					} catch (err) {
+						projectFiles = moveNodeInTree(projectFiles, targetPath, sourceFile.path);
+						throw err;
+					}
 				}
 			}
+
+			if (expandFolder && !expandedFolders.has(expandFolder)) {
+				expandedFolders.add(expandFolder);
+				expandedFolders = new Set(expandedFolders);
+			}
+
+			if (operation === 'cut') {
+				clipboard = null;
+				clearSelection();
+			}
 		} catch (error) {
-			debug.error('file', 'Failed to paste to root:', error);
+			debug.error('file', 'Failed to paste:', error);
 			showErrorAlert(error instanceof Error ? error.message : 'Unknown error', 'Paste Failed');
 		}
 	}
@@ -929,6 +1008,8 @@
 	}
 
 	async function handleFileAction(action: string, file: FileNode) {
+		const targets = getActionTargets(file);
+
 		switch (action) {
 			case 'copy-path':
 				navigator.clipboard.writeText(file.path);
@@ -948,10 +1029,10 @@
 				openDialog('rename', file);
 				break;
 			case 'copy':
-				clipboard = { file, operation: 'copy' };
+				clipboard = { files: targets, operation: 'copy' };
 				break;
 			case 'cut':
-				clipboard = { file, operation: 'cut' };
+				clipboard = { files: targets, operation: 'cut' };
 				break;
 			case 'paste':
 				if (clipboard) await pasteFile(file);
@@ -966,21 +1047,34 @@
 				await duplicateFile(file);
 				break;
 			case 'delete':
-				await deleteFile(file);
+				await deleteFiles(targets);
 				break;
 			case 'refresh':
 				await refreshAll();
 				break;
+			case 'upload':
+				if (file.type === 'directory') triggerUpload(file.path);
+				break;
+			case 'zip':
+				await zipFiles(targets);
+				break;
+			case 'extract':
+				if (file.type === 'file') await extractZip(file);
+				break;
 		}
 	}
 
-	async function deleteFile(file: FileNode) {
-		const confirmMessage = file.type === 'directory'
-			? `Are you sure you want to delete the folder "${file.name}" and all its contents?`
-			: `Are you sure you want to delete "${file.name}"?`;
+	async function deleteFiles(files: FileNode[]) {
+		if (files.length === 0) return;
+
+		const confirmMessage = files.length === 1
+			? (files[0].type === 'directory'
+				? `Are you sure you want to delete the folder "${files[0].name}" and all its contents?`
+				: `Are you sure you want to delete "${files[0].name}"?`)
+			: `Are you sure you want to delete ${files.length} items?`;
 
 		const confirmed = await showConfirm({
-			title: file.type === 'directory' ? 'Delete Folder' : 'Delete File',
+			title: files.length === 1 && files[0].type === 'directory' ? 'Delete Folder' : (files.length === 1 ? 'Delete File' : 'Delete Items'),
 			message: confirmMessage,
 			type: 'error',
 			confirmText: 'Delete',
@@ -988,28 +1082,32 @@
 		});
 		if (!confirmed) return;
 
-		try {
-			const deletedNode = findFileInTree(projectFiles, file.path);
-			projectFiles = removeNodeFromTree(projectFiles, file.path);
-
-			// Close tab if open
-			closeTab(file.path);
-
+		for (const file of files) {
 			try {
-				await ws.http('files:delete', { filePath: file.path, force: file.type === 'directory' });
-			} catch (err) {
-				if (deletedNode) {
-					const pathParts = file.path.split(/[\\/]/);
-					pathParts.pop();
-					const parentPath = pathParts.length > 0 ? pathParts.join(file.path.includes('\\') ? '\\' : '/') : null;
-					projectFiles = addNodeToTree(projectFiles, parentPath, deletedNode);
+				const deletedNode = findFileInTree(projectFiles, file.path);
+				projectFiles = removeNodeFromTree(projectFiles, file.path);
+
+				// Close tab if open
+				closeTab(file.path);
+
+				try {
+					await ws.http('files:delete', { filePath: file.path, force: file.type === 'directory' });
+				} catch (err) {
+					if (deletedNode) {
+						const pathParts = file.path.split(/[\\/]/);
+						pathParts.pop();
+						const parentPath = pathParts.length > 0 ? pathParts.join(file.path.includes('\\') ? '\\' : '/') : null;
+						projectFiles = addNodeToTree(projectFiles, parentPath, deletedNode);
+					}
+					throw err;
 				}
-				throw err;
+			} catch (error) {
+				debug.error('file', 'Failed to delete file:', error);
+				showErrorAlert(error instanceof Error ? error.message : 'Unknown error', 'Delete Failed');
+				break;
 			}
-		} catch (error) {
-			debug.error('file', 'Failed to delete file:', error);
-			showErrorAlert(error instanceof Error ? error.message : 'Unknown error', 'Delete Failed');
 		}
+		clearSelection();
 	}
 
 	async function duplicateFile(file: FileNode) {
@@ -1037,6 +1135,426 @@
 
 	function createNewFolderInRoot() {
 		openDialog('new-folder', undefined, null);
+	}
+
+	// ============================
+	// Busy state — per-path counters so concurrent ops on the same node
+	// don't clear each other prematurely. `rootBusyOps` covers operations
+	// targeting the project root (where there is no file node to spinner).
+	// `activeOps` drives the top-of-tree banner so the user has a clearly
+	// visible indicator even when the affected node is collapsed or
+	// scrolled out of view.
+	//
+	// IMPORTANT: Plain Map/Set are NOT made reactive by $state() in Svelte 5
+	// — we have to use SvelteMap so mutations notify the UI.
+	// ============================
+
+	const busyOps = new SvelteMap<string, number>();
+	const busyPaths = $derived(new Set(busyOps.keys()));
+	let rootBusyOps = $state(0);
+	const isRootBusy = $derived(rootBusyOps > 0);
+
+	type ActiveOp = {
+		id: string;
+		kind: 'upload' | 'zip' | 'extract';
+		label: string;
+		progress?: number; // 0–1, only set for chunked uploads
+	};
+	const activeOps = new SvelteMap<string, ActiveOp>();
+	const activeOpsList = $derived(Array.from(activeOps.values()));
+
+	function pushOp(op: ActiveOp): void {
+		activeOps.set(op.id, op);
+	}
+	function updateOp(id: string, patch: Partial<ActiveOp>): void {
+		const existing = activeOps.get(id);
+		if (!existing) return;
+		activeOps.set(id, { ...existing, ...patch });
+	}
+	function popOp(id: string): void {
+		activeOps.delete(id);
+	}
+
+	function markBusy(path: string, delta: 1 | -1): void {
+		const current = busyOps.get(path) ?? 0;
+		const next = current + delta;
+		if (next <= 0) {
+			busyOps.delete(path);
+		} else {
+			busyOps.set(path, next);
+		}
+	}
+
+	// ============================
+	// Upload
+	// ============================
+
+	let uploadInputRef = $state<HTMLInputElement | null>(null);
+	let uploadTargetDir = $state<string>('');
+
+	function triggerUpload(targetDir: string) {
+		uploadTargetDir = targetDir || projectPath;
+		uploadInputRef?.click();
+	}
+
+	function triggerUploadToRoot() {
+		triggerUpload(projectPath);
+	}
+
+	async function handleUploadInputChange(event: Event) {
+		const input = event.target as HTMLInputElement;
+		if (!input.files || input.files.length === 0) return;
+		await uploadFilesTo(input.files, uploadTargetDir);
+		input.value = '';
+	}
+
+	function formatBytes(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+	}
+
+	// HTTP upload via /api/files/upload. The WS path used to wedge on the Vite
+	// dev proxy (`write EPIPE`) on sustained binary transfers; HTTP through the
+	// same proxy streams cleanly. XHR is used so we can drive a real progress
+	// bar via `upload.onprogress`.
+	async function uploadSingleFileHttp(file: File, targetDir: string, opId: string, fileIndex: number, total: number): Promise<{ finalName: string; finalPath: string } | null> {
+		const targetFullPath = generateUniqueFilename(targetDir, file.name);
+		const finalName = targetFullPath.split(/[\\/]/).pop() || file.name;
+
+		updateOp(opId, {
+			label: total === 1
+				? `Uploading ${finalName} (${formatBytes(file.size)})`
+				: `Uploading ${fileIndex + 1}/${total}: ${finalName} (${formatBytes(file.size)})`,
+			progress: 0
+		});
+
+		const token = authStore.sessionToken;
+		if (!token) throw new Error('Not authenticated');
+
+		const params = new URLSearchParams({
+			targetPath: targetDir,
+			fileName: finalName,
+			fileSize: String(file.size)
+		});
+
+		return await new Promise<{ finalName: string; finalPath: string }>((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			xhr.open('POST', `/api/files/upload?${params.toString()}`);
+			xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+			xhr.responseType = 'text';
+
+			xhr.upload.onprogress = (e) => {
+				if (e.lengthComputable && e.total > 0) {
+					updateOp(opId, { progress: e.loaded / e.total });
+				}
+			};
+
+			xhr.onload = () => {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					updateOp(opId, { progress: 1 });
+					resolve({ finalName, finalPath: targetFullPath });
+				} else {
+					const msg = (xhr.responseText || '').trim();
+					reject(new Error(msg || `Upload failed (HTTP ${xhr.status})`));
+				}
+			};
+			xhr.onerror = () => reject(new Error('Network error during upload'));
+			xhr.onabort = () => reject(new Error('Upload aborted'));
+
+			xhr.send(file);
+		});
+	}
+
+	async function uploadFilesTo(files: FileList | File[], targetDir: string) {
+		if (!targetDir) return;
+		const list = Array.from(files);
+		if (list.length === 0) return;
+
+		const isRoot = targetDir === projectPath;
+		if (isRoot) {
+			rootBusyOps += 1;
+		} else {
+			markBusy(targetDir, 1);
+		}
+
+		const opId = crypto.randomUUID();
+		pushOp({
+			id: opId,
+			kind: 'upload',
+			label: list.length === 1 ? `Uploading ${list[0].name}` : `Uploading ${list.length} files`,
+			progress: 0
+		});
+
+		try {
+			for (let i = 0; i < list.length; i++) {
+				const f = list[i];
+				try {
+					const result = await uploadSingleFileHttp(f, targetDir, opId, i, list.length);
+					if (!result) continue;
+					// Optimistically add to tree so subsequent uploads in the same
+					// batch see the new name and auto-rename correctly.
+					const parentForAdd = targetDir === projectPath ? null : targetDir;
+					const newNode: FileNode = {
+						name: result.finalName,
+						path: result.finalPath,
+						type: 'file',
+						size: f.size,
+						modified: new Date()
+					};
+					projectFiles = addNodeToTree(projectFiles, parentForAdd, newNode);
+					if (parentForAdd && !expandedFolders.has(parentForAdd)) {
+						expandedFolders.add(parentForAdd);
+						expandedFolders = new Set(expandedFolders);
+					}
+				} catch (error) {
+					debug.error('file', 'Failed to upload file:', error);
+					showErrorAlert(error instanceof Error ? error.message : 'Upload failed', 'Upload Failed');
+				}
+			}
+		} finally {
+			popOp(opId);
+			if (isRoot) {
+				rootBusyOps = Math.max(0, rootBusyOps - 1);
+			} else {
+				markBusy(targetDir, -1);
+			}
+		}
+	}
+
+	// ============================
+	// Zip / Extract
+	// ============================
+
+	async function zipFiles(targets: FileNode[]) {
+		if (targets.length === 0) return;
+		const first = targets[0];
+		const parts = first.path.split(/[\\/]/);
+		parts.pop();
+		const sep = first.path.includes('\\') ? '\\' : '/';
+		const parentPath = parts.length > 0 ? parts.join(sep) : projectPath;
+		const baseName = targets.length === 1 ? `${targets[0].name}.zip` : 'archive.zip';
+		const targetPath = generateUniqueFilename(parentPath, baseName);
+		const targetName = targetPath.split(/[\\/]/).pop() || baseName;
+
+		const busyTargets = targets.map((t) => t.path);
+		for (const p of busyTargets) markBusy(p, 1);
+		const opId = crypto.randomUUID();
+		pushOp({
+			id: opId,
+			kind: 'zip',
+			label: targets.length === 1
+				? `Compressing ${targets[0].name} → ${targetName}`
+				: `Compressing ${targets.length} items → ${targetName}`
+		});
+		try {
+			await ws.http(
+				'files:zip',
+				{
+					sourcePaths: targets.map((t) => t.path),
+					targetPath
+				},
+				// Compression can take a while for big trees — give it room.
+				300_000
+			);
+			// Watcher will pick the new zip up; explicitly refresh for snappier UI.
+			await loadProjectFiles(true);
+		} catch (error) {
+			debug.error('file', 'Failed to create archive:', error);
+			showErrorAlert(error instanceof Error ? error.message : 'Compress failed', 'Compress Failed');
+		} finally {
+			popOp(opId);
+			for (const p of busyTargets) markBusy(p, -1);
+		}
+	}
+
+	async function extractZip(file: FileNode) {
+		const parts = file.path.split(/[\\/]/);
+		const fileName = parts.pop() || file.name;
+		const sep = file.path.includes('\\') ? '\\' : '/';
+		const parentPath = parts.length > 0 ? parts.join(sep) : projectPath;
+		const baseName = fileName.replace(/\.zip$/i, '') || 'extracted';
+		const targetDir = generateUniqueFilename(parentPath, baseName);
+		const targetName = targetDir.split(/[\\/]/).pop() || baseName;
+
+		markBusy(file.path, 1);
+		const opId = crypto.randomUUID();
+		pushOp({
+			id: opId,
+			kind: 'extract',
+			label: `Extracting ${fileName} → ${targetName}`
+		});
+		try {
+			await ws.http(
+				'files:extract',
+				{
+					archivePath: file.path,
+					targetDir
+				},
+				300_000
+			);
+			await loadProjectFiles(true);
+		} catch (error) {
+			debug.error('file', 'Failed to extract archive:', error);
+			showErrorAlert(error instanceof Error ? error.message : 'Extract failed', 'Extract Failed');
+		} finally {
+			popOp(opId);
+			markBusy(file.path, -1);
+		}
+	}
+
+	// ============================
+	// Drag-and-Drop (move + OS upload)
+	// ============================
+
+	const DND_MIME = 'application/x-clopen-fileops';
+	let dropTargetPath = $state<string | null>(null);
+	let isRootDropTarget = $state(false);
+
+	function getDragPaths(file: FileNode): string[] {
+		if (selectedPaths.has(file.path) && selectedPaths.size > 1) {
+			return Array.from(selectedPaths);
+		}
+		return [file.path];
+	}
+
+	function onNodeDragStart(file: FileNode, event: DragEvent) {
+		const paths = getDragPaths(file);
+		if (!selectedPaths.has(file.path)) {
+			selectedPaths = new Set([file.path]);
+			selectionAnchor = file.path;
+		}
+		if (event.dataTransfer) {
+			event.dataTransfer.effectAllowed = 'move';
+			event.dataTransfer.setData(DND_MIME, JSON.stringify({ paths }));
+			event.dataTransfer.setData('text/plain', paths.join('\n'));
+		}
+	}
+
+	function hasInternalDrag(event: DragEvent): boolean {
+		return event.dataTransfer ? Array.from(event.dataTransfer.types).includes(DND_MIME) : false;
+	}
+
+	function hasOSFiles(event: DragEvent): boolean {
+		return event.dataTransfer ? Array.from(event.dataTransfer.types).includes('Files') : false;
+	}
+
+	function onNodeDragOver(file: FileNode, event: DragEvent) {
+		if (file.type !== 'directory') return;
+		if (!hasInternalDrag(event) && !hasOSFiles(event)) return;
+		event.preventDefault();
+		event.stopPropagation();
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = hasInternalDrag(event) ? 'move' : 'copy';
+		}
+		dropTargetPath = file.path;
+		isRootDropTarget = false;
+	}
+
+	function onNodeDragLeave(file: FileNode, _event: DragEvent) {
+		if (dropTargetPath === file.path) {
+			dropTargetPath = null;
+		}
+	}
+
+	async function onNodeDrop(file: FileNode, event: DragEvent) {
+		if (file.type !== 'directory') return;
+		event.preventDefault();
+		event.stopPropagation();
+		dropTargetPath = null;
+		isRootDropTarget = false;
+
+		if (hasOSFiles(event) && event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
+			await uploadFilesTo(event.dataTransfer.files, file.path);
+			return;
+		}
+
+		if (hasInternalDrag(event) && event.dataTransfer) {
+			try {
+				const raw = event.dataTransfer.getData(DND_MIME);
+				const payload = JSON.parse(raw) as { paths: string[] };
+				await moveNodesTo(payload.paths, file.path);
+			} catch (err) {
+				debug.error('file', 'Drop parse failed:', err);
+			}
+		}
+	}
+
+	function onNodeDragEnd(_file: FileNode, _event: DragEvent) {
+		dropTargetPath = null;
+		isRootDropTarget = false;
+	}
+
+	function onRootDragOver(event: DragEvent) {
+		if (!hasInternalDrag(event) && !hasOSFiles(event)) return;
+		event.preventDefault();
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = hasInternalDrag(event) ? 'move' : 'copy';
+		}
+		isRootDropTarget = true;
+	}
+
+	function onRootDragLeave(_event: DragEvent) {
+		isRootDropTarget = false;
+	}
+
+	async function onRootDrop(event: DragEvent) {
+		event.preventDefault();
+		isRootDropTarget = false;
+		dropTargetPath = null;
+
+		if (hasOSFiles(event) && event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
+			await uploadFilesTo(event.dataTransfer.files, projectPath);
+			return;
+		}
+
+		if (hasInternalDrag(event) && event.dataTransfer) {
+			try {
+				const raw = event.dataTransfer.getData(DND_MIME);
+				const payload = JSON.parse(raw) as { paths: string[] };
+				await moveNodesTo(payload.paths, projectPath);
+			} catch (err) {
+				debug.error('file', 'Root drop parse failed:', err);
+			}
+		}
+	}
+
+	async function moveNodesTo(sourcePaths: string[], targetDirPath: string) {
+		const sep = targetDirPath.includes('\\') ? '\\' : '/';
+		for (const src of sourcePaths) {
+			if (src === targetDirPath) continue;
+			// Reject moving a folder into itself or its descendant
+			if (targetDirPath === src || targetDirPath.startsWith(`${src}${sep}`)) {
+				showErrorAlert('Cannot move a folder into itself or its descendant.', 'Move Failed');
+				return;
+			}
+			// No-op when already in target
+			const srcParts = src.split(/[\\/]/);
+			srcParts.pop();
+			const srcParent = srcParts.join(sep);
+			if (srcParent === targetDirPath) continue;
+
+			const name = src.split(/[\\/]/).pop() || '';
+			const targetPath = generateUniqueFilename(targetDirPath, name);
+
+			projectFiles = moveNodeInTree(projectFiles, src, targetPath);
+			try {
+				await ws.http('files:rename', { oldPath: src, newPath: targetPath });
+				// Update any open tab whose path matches
+				openTabs = openTabs.map((t) =>
+					t.file.path === src
+						? { ...t, file: { ...t.file, path: targetPath, name: targetPath.split(/[\\/]/).pop() || t.file.name } }
+						: t
+				);
+				if (activeTabPath === src) activeTabPath = targetPath;
+			} catch (err) {
+				projectFiles = moveNodeInTree(projectFiles, targetPath, src);
+				showErrorAlert(err instanceof Error ? err.message : 'Move failed', 'Move Failed');
+				return;
+			}
+		}
+		clearSelection();
 	}
 
 	// Save file
@@ -1557,7 +2075,37 @@
 	{/if}
 {/snippet}
 
-<div class="h-full flex flex-col bg-transparent" bind:this={containerRef}>
+<div class="relative h-full flex flex-col bg-transparent" bind:this={containerRef}>
+	<!-- Active operations banner — pinned to the bottom of the panel so it
+	     stays visible regardless of tree scroll position. Mirrors the per-row
+	     spinner for users whose target node is collapsed or off-screen. -->
+	{#if activeOpsList.length > 0}
+		<div
+			class="absolute left-2 right-2 bottom-2 z-30 flex flex-col gap-1.5 pointer-events-none"
+			aria-live="polite"
+			aria-label="File operations in progress"
+		>
+			{#each activeOpsList as op (op.id)}
+				<div
+					class="pointer-events-auto flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/95 dark:bg-slate-800/95 text-slate-100 shadow-lg backdrop-blur border border-slate-700/60 text-xs"
+				>
+					<span class="w-3.5 h-3.5 border-2 border-violet-300/40 border-t-violet-300 rounded-full animate-spin flex-shrink-0"></span>
+					<div class="flex-1 min-w-0">
+						<div class="truncate">{op.label}</div>
+						{#if op.progress !== undefined}
+							<div class="mt-1 h-1 w-full rounded-full bg-slate-700/60 overflow-hidden">
+								<div
+									class="h-full bg-violet-400 transition-all duration-150"
+									style="width: {Math.min(100, Math.max(0, op.progress * 100)).toFixed(1)}%"
+								></div>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	{#if !hasActiveProject}
 		<div class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600 dark:text-slate-500 text-sm">
 			<Icon name="lucide:folder" class="w-10 h-10 opacity-30" />
@@ -1603,10 +2151,26 @@
 							onPasteToRoot={pasteToRoot}
 							onNewFileInRoot={createNewFileInRoot}
 							onNewFolderInRoot={createNewFolderInRoot}
+							onUploadToRoot={triggerUploadToRoot}
 							onRefresh={refreshAll}
 							modifiedFiles={modifiedFilePaths}
 							gitStatusMap={gitStatusState.map}
 							gitFolderStatusMap={gitStatusState.folderMap}
+							{selectedPaths}
+							onNodeClick={handleNodeClick}
+							{onNodeDragStart}
+							{onNodeDragOver}
+							{onNodeDragLeave}
+							{onNodeDrop}
+							{onNodeDragEnd}
+							{dropTargetPath}
+							{onRootDragOver}
+							{onRootDragLeave}
+							{onRootDrop}
+							onClearSelection={clearSelection}
+							{isRootDropTarget}
+							{busyPaths}
+							{isRootBusy}
 						/>
 					</div>
 				</div>
@@ -1680,5 +2244,14 @@
 		message={alertMessage}
 		type={alertType}
 		onClose={() => { showAlert = false; }}
+	/>
+
+	<!-- Hidden file input used by upload triggers -->
+	<input
+		bind:this={uploadInputRef}
+		type="file"
+		multiple
+		class="hidden"
+		onchange={handleUploadInputChange}
 	/>
 </div>

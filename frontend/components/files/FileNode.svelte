@@ -24,7 +24,16 @@
 		modifiedFiles = new Set<string>(),
 		activeFilePath = null,
 		gitStatusMap = new Map<string, string>(),
-		gitFolderStatusMap = new Map<string, string>()
+		gitFolderStatusMap = new Map<string, string>(),
+		selectedPaths = new Set<string>(),
+		onClick,
+		onNodeDragStart,
+		onNodeDragOver,
+		onNodeDragLeave,
+		onNodeDrop,
+		onNodeDragEnd,
+		dropTargetPath = null,
+		busyPaths = new Set<string>()
 	}: {
 		file: FileNodeType;
 		isSelected?: boolean;
@@ -42,11 +51,28 @@
 		activeFilePath?: string | null;
 		gitStatusMap?: Map<string, string>;
 		gitFolderStatusMap?: Map<string, string>;
+		selectedPaths?: Set<string>;
+		onClick?: (file: FileNodeType, event: MouseEvent | KeyboardEvent) => void;
+		onNodeDragStart?: (file: FileNodeType, event: DragEvent) => void;
+		onNodeDragOver?: (file: FileNodeType, event: DragEvent) => void;
+		onNodeDragLeave?: (file: FileNodeType, event: DragEvent) => void;
+		onNodeDrop?: (file: FileNodeType, event: DragEvent) => void;
+		onNodeDragEnd?: (file: FileNodeType, event: DragEvent) => void;
+		dropTargetPath?: string | null;
+		busyPaths?: Set<string>;
 	} = $props();
+
+	const isBusy = $derived(busyPaths.has(file.path));
 
 	// Determine if this node is the active file
 	const isActiveFile = $derived(
 		activeFilePath ? file.path === activeFilePath : isSelected
+	);
+
+	// Multi-selection membership (separate from the single active-file highlight).
+	const isInSelection = $derived(selectedPaths.has(file.path));
+	const isDropTarget = $derived(
+		file.type === 'directory' && dropTargetPath !== null && dropTargetPath === file.path
 	);
 
 	// Compute if this node's menu is open
@@ -116,7 +142,12 @@
 		return getFileIcon(fileName);
 	}
 
-	function handleClick() {
+	function handleClick(event: MouseEvent | KeyboardEvent) {
+		if (isBusy) return;
+		if (onClick) {
+			onClick(file, event);
+			return;
+		}
 		if (file.type === 'directory') {
 			onToggle?.(file.path);
 		} else {
@@ -126,6 +157,7 @@
 
 	function handleContextMenu(event: MouseEvent) {
 		event.preventDefault();
+		if (isBusy) return;
 		if (!isMenuOpen) {
 			menuStyle = computeMenuStyle(event.clientX, event.clientY, false);
 		}
@@ -134,6 +166,7 @@
 
 	function handleAction(action: string, event: Event) {
 		event.stopPropagation();
+		if (isBusy) return;
 		onAction?.(action, file);
 	}
 
@@ -154,24 +187,33 @@
 
 <div
 	bind:this={nodeElement}
-	class="group relative flex items-center space-x-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors {isActiveFile
+	class="group relative flex items-center space-x-2 px-2 py-1.5 rounded-md transition-colors {isActiveFile
 		? 'bg-violet-500/10 dark:bg-violet-500/15 text-slate-900 dark:text-slate-100'
-		: 'hover:bg-slate-100/50 dark:hover:bg-slate-800/50'}"
+		: isInSelection
+			? 'bg-violet-500/5 dark:bg-violet-500/10 text-slate-900 dark:text-slate-100'
+			: 'hover:bg-slate-100/50 dark:hover:bg-slate-800/50'} {isDropTarget ? 'ring-2 ring-violet-500/60 ring-inset' : ''} {isBusy ? 'opacity-60 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}"
 	class:selected={isActiveFile}
 	class:directory={file.type === 'directory'}
 	title={file.name}
 	style="padding-left: {(depth * 12 + 6) / 16}rem"
+	aria-busy={isBusy ? 'true' : undefined}
 	onclick={handleClick}
 	oncontextmenu={handleContextMenu}
 	onkeydown={(e) => {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
-			handleClick();
+			handleClick(e);
 		}
 	}}
 	role="button"
 	tabindex="0"
 	aria-label="{file.type === 'directory' ? 'Folder' : 'File'}: {file.name}"
+	draggable={onNodeDragStart && !isBusy ? true : undefined}
+	ondragstart={onNodeDragStart && !isBusy ? (e) => onNodeDragStart(file, e) : undefined}
+	ondragover={onNodeDragOver && !isBusy ? (e) => onNodeDragOver(file, e) : undefined}
+	ondragleave={onNodeDragLeave && !isBusy ? (e) => onNodeDragLeave(file, e) : undefined}
+	ondrop={onNodeDrop && !isBusy ? (e) => onNodeDrop(file, e) : undefined}
+	ondragend={onNodeDragEnd && !isBusy ? (e) => onNodeDragEnd(file, e) : undefined}
 >
 	<!-- Expand/collapse arrow for directories -->
 	{#if file.type === 'directory'}
@@ -186,9 +228,17 @@
 		<span class="w-4"></span>
 	{/if}
 
-	<!-- File/folder icon -->
-	<span class="flex-shrink-0">
-		<Icon name={getDisplayIcon(file.name, file.type === 'directory')} />
+	<!-- File/folder icon (or spinner while busy) -->
+	<span class="flex-shrink-0 inline-flex items-center justify-center w-4 h-4">
+		{#if isBusy}
+			<span
+				class="w-3.5 h-3.5 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin"
+				title="Working…"
+				aria-label="Working"
+			></span>
+		{:else}
+			<Icon name={getDisplayIcon(file.name, file.type === 'directory')} />
+		{/if}
 	</span>
 
 	<!-- File/folder name -->
@@ -255,6 +305,14 @@
 
 					<button
 						class="w-full px-3 py-1.5 text-xs text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+						onclick={(e) => { handleAction('upload', e); closeMenu(); }}
+					>
+						<Icon name="lucide:upload" class="w-3 h-3" />
+						Upload File...
+					</button>
+
+					<button
+						class="w-full px-3 py-1.5 text-xs text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
 						onclick={(e) => { handleAction('find-in-folder', e); closeMenu(); }}
 					>
 						<Icon name="lucide:search" class="w-3 h-3" />
@@ -312,6 +370,27 @@
 
 				<div class="border-t border-slate-200 dark:border-slate-700 my-1"></div>
 
+				<!-- Archive actions -->
+				<button
+					class="w-full px-3 py-1.5 text-xs text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+					onclick={(e) => { handleAction('zip', e); closeMenu(); }}
+				>
+					<Icon name="lucide:file-archive" class="w-3 h-3" />
+					Compress to ZIP
+				</button>
+
+				{#if file.type === 'file' && file.name.toLowerCase().endsWith('.zip')}
+					<button
+						class="w-full px-3 py-1.5 text-xs text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+						onclick={(e) => { handleAction('extract', e); closeMenu(); }}
+					>
+						<Icon name="lucide:archive-restore" class="w-3 h-3" />
+						Extract Here
+					</button>
+				{/if}
+
+				<div class="border-t border-slate-200 dark:border-slate-700 my-1"></div>
+
 				<!-- Duplicate, Rename, Delete -->
 				<button
 					class="w-full px-3 py-1.5 text-xs text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
@@ -362,6 +441,15 @@
 			{activeFilePath}
 			{gitStatusMap}
 			{gitFolderStatusMap}
+			{selectedPaths}
+			{onClick}
+			{onNodeDragStart}
+			{onNodeDragOver}
+			{onNodeDragLeave}
+			{onNodeDrop}
+			{onNodeDragEnd}
+			{dropTargetPath}
+			{busyPaths}
 		/>
 	{/each}
 {/if}

@@ -139,14 +139,37 @@ export async function extractZipOperation(archivePath: string, targetDir: string
 		}
 
 		const data = new Uint8Array(await archiveFile.arrayBuffer());
+		
+		// SECURITY: Check compression ratio BEFORE full decompression to prevent zip bomb DoS.
+		// Parse zip central directory to calculate uncompressed size without decompressing.
+		const uncompressedSize = calculateUncompressedSize(data);
+		const compressedSize = stats.size;
+		const compressionRatio = uncompressedSize / compressedSize;
+		
+		// Reject suspicious compression ratios (>100x indicates potential zip bomb)
+		const MAX_COMPRESSION_RATIO = 100;
+		if (compressionRatio > MAX_COMPRESSION_RATIO) {
+			throw new Error(
+				`Suspicious compression ratio (${Math.floor(compressionRatio)}x). ` +
+				`Archive may be a zip bomb. Maximum allowed ratio is ${MAX_COMPRESSION_RATIO}x.`
+			);
+		}
+		
+		// Also check if uncompressed size exceeds limit
+		if (uncompressedSize > limit) {
+			throw new Error(`Extracted content would exceed maximum allowed size of ${limitMB}MB`);
+		}
+
 		const unzipped = unzipSync(data);
 
 		let totalBytes = 0;
 		for (const buf of Object.values(unzipped)) {
 			totalBytes += buf.byteLength;
-			if (totalBytes > limit) {
-				throw new Error(`Extracted content exceeds maximum allowed size of ${limitMB}MB`);
-			}
+		}
+		
+		// Final safety check after decompression (should already be caught above)
+		if (totalBytes > limit) {
+			throw new Error(`Extracted content exceeds maximum allowed size of ${limitMB}MB`);
 		}
 
 		let entryCount = 0;
@@ -187,5 +210,70 @@ export async function extractZipOperation(archivePath: string, targetDir: string
 		}
 		throw new Error('Failed to extract archive');
 	}
+}
+
+/**
+ * Calculate total uncompressed size from zip central directory without decompressing.
+ * This prevents zip bomb DoS by checking size before memory allocation.
+ * 
+ * ZIP file structure:
+ * - Local file headers + compressed data
+ * - Central directory (contains uncompressed sizes)
+ * - End of central directory record
+ */
+function calculateUncompressedSize(zipData: Uint8Array): number {
+	// Find End of Central Directory Record (EOCD)
+	// Signature: 0x06054b50 (little-endian: 50 4b 05 06)
+	const eocdSignature = 0x06054b50;
+	let eocdOffset = -1;
+	
+	// Search from end (EOCD is at the end, but may have comment after it)
+	for (let i = zipData.length - 22; i >= 0; i--) {
+		const sig = zipData[i] | (zipData[i + 1] << 8) | (zipData[i + 2] << 16) | (zipData[i + 3] << 24);
+		if (sig === eocdSignature) {
+			eocdOffset = i;
+			break;
+		}
+	}
+	
+	if (eocdOffset === -1) {
+		throw new Error('Invalid ZIP file: End of Central Directory not found');
+	}
+	
+	// Read central directory offset and size from EOCD
+	const cdSize = zipData[eocdOffset + 12] | (zipData[eocdOffset + 13] << 8) | 
+	               (zipData[eocdOffset + 14] << 16) | (zipData[eocdOffset + 15] << 24);
+	const cdOffset = zipData[eocdOffset + 16] | (zipData[eocdOffset + 17] << 8) | 
+	                 (zipData[eocdOffset + 18] << 16) | (zipData[eocdOffset + 19] << 24);
+	
+	// Parse central directory to sum uncompressed sizes
+	let totalUncompressedSize = 0;
+	let offset = cdOffset;
+	const cdEnd = cdOffset + cdSize;
+	const centralFileHeaderSignature = 0x02014b50;
+	
+	while (offset < cdEnd) {
+		const sig = zipData[offset] | (zipData[offset + 1] << 8) | 
+		            (zipData[offset + 2] << 16) | (zipData[offset + 3] << 24);
+		
+		if (sig !== centralFileHeaderSignature) {
+			break;
+		}
+		
+		// Read uncompressed size (offset 24-27 in central directory file header)
+		const uncompressedSize = zipData[offset + 24] | (zipData[offset + 25] << 8) | 
+		                         (zipData[offset + 26] << 16) | (zipData[offset + 27] << 24);
+		totalUncompressedSize += uncompressedSize;
+		
+		// Read filename length and extra field length to skip to next entry
+		const filenameLen = zipData[offset + 28] | (zipData[offset + 29] << 8);
+		const extraLen = zipData[offset + 30] | (zipData[offset + 31] << 8);
+		const commentLen = zipData[offset + 32] | (zipData[offset + 33] << 8);
+		
+		// Central directory file header is 46 bytes + variable fields
+		offset += 46 + filenameLen + extraLen + commentLen;
+	}
+	
+	return totalUncompressedSize;
 }
 

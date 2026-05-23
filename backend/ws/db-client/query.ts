@@ -6,6 +6,7 @@ import { t } from 'elysia';
 import { createRouter } from '$shared/utils/ws-server';
 import { connectionManager } from '../../db-client/connection-manager';
 import { runSafely } from '../../db-client/query-executor';
+import { validateQuery } from '../../db-client/query-validator';
 import { dbClientQueryHistoryQueries } from '../../database/queries';
 import { getDbClientPrincipal, requireDbClientConnectionAccess } from './access';
 import { debug } from '$shared/utils/logger';
@@ -53,6 +54,28 @@ export const queryHandler = createRouter()
 	}, async ({ data, conn }) => {
 		const { userId } = getDbClientPrincipal(conn);
 		const connection = requireDbClientConnectionAccess(conn, data.connectionId);
+		
+		// Validate query for security issues
+		const validation = validateQuery(connection.driver, data.query, data.params);
+		if (!validation.safe) {
+			const error = new Error(`Query validation failed: ${validation.errors.join(', ')}`);
+			recordHistory({
+				connectionId: data.connectionId,
+				userId,
+				query: data.query,
+				status: 'error',
+				durationMs: null,
+				rowCount: null,
+				error: error.message
+			});
+			throw error;
+		}
+		
+		// Log warnings if any
+		if (validation.warnings.length > 0) {
+			debug.warn('db-client', `Query warnings for connection ${data.connectionId}:`, validation.warnings);
+		}
+		
 		const adapter = await connectionManager.get(data.connectionId);
 		try {
 			const result = await runSafely({
@@ -99,6 +122,28 @@ export const queryHandler = createRouter()
 	}, async ({ data, conn }) => {
 		const { userId } = getDbClientPrincipal(conn);
 		const connection = requireDbClientConnectionAccess(conn, data.connectionId);
+		
+		// Validate query for security issues
+		const validation = validateQuery(connection.driver, data.query, data.params);
+		if (!validation.safe) {
+			const error = new Error(`Query validation failed: ${validation.errors.join(', ')}`);
+			recordHistory({
+				connectionId: data.connectionId,
+				userId,
+				query: data.query,
+				status: 'error',
+				durationMs: null,
+				rowCount: null,
+				error: error.message
+			});
+			throw error;
+		}
+		
+		// Log warnings if any
+		if (validation.warnings.length > 0) {
+			debug.warn('db-client', `Query warnings for connection ${data.connectionId}:`, validation.warnings);
+		}
+		
 		const adapter = await connectionManager.get(data.connectionId);
 		try {
 			const result = await runSafely({

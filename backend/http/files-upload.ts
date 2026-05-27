@@ -20,7 +20,7 @@ import { mkdir, rename, stat, unlink } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
-import { authQueries } from '../database/queries';
+import { authQueries, fileAuditLogQueries } from '../database/queries';
 import { requireFilePathAccessFor } from '../ws/files/path-access';
 import { validateFileSize } from '../files/file-size-limit';
 
@@ -152,6 +152,15 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 
 		await rename(tempPath, resolvedFinal);
 		const stats = await stat(resolvedFinal);
+
+		// Log successful upload to audit log
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			action: 'upload',
+			filePath: resolvedFinal,
+			fileSize: stats.size,
+			ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined
+		});
 
 		return Response.json({
 			message: 'File uploaded successfully',

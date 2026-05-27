@@ -40,6 +40,7 @@ export const loginHandler = createRouter()
 			expiresAt: t.String()
 		})
 	}, async ({ data, conn }) => {
+		const ip = ws.getRemoteAddress(conn);
 		const result = createAdmin(data.name);
 
 		// Save authMode to system settings
@@ -49,6 +50,19 @@ export const loginHandler = createRouter()
 			: {};
 		parsed.authMode = 'required';
 		settingsQueries.set('system:settings', JSON.stringify(parsed));
+
+		// Log audit event for setup
+		try {
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:setup',
+				eventDetails: `Admin account created: ${result.user.name}`,
+				ipAddress: ip
+			});
+		} catch (err) {
+			// Audit log failure should not break auth flow
+		}
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -70,6 +84,8 @@ export const loginHandler = createRouter()
 			throw new Error('Setup already completed.');
 		}
 
+		const ip = ws.getRemoteAddress(conn);
+
 		// Save authMode to system settings
 		const currentSettings = settingsQueries.get('system:settings');
 		const parsed = currentSettings?.value
@@ -80,6 +96,19 @@ export const loginHandler = createRouter()
 
 		// Create or get default admin
 		const result = createOrGetNoAuthAdmin();
+
+		// Log audit event for no-auth setup
+		try {
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:setup-no-auth',
+				eventDetails: `No-auth mode enabled, admin: ${result.user.name}`,
+				ipAddress: ip
+			});
+		} catch (err) {
+			// Audit log failure should not break auth flow
+		}
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -101,7 +130,21 @@ export const loginHandler = createRouter()
 			throw new Error('Auto-login is only available in no-auth mode');
 		}
 
+		const ip = ws.getRemoteAddress(conn);
 		const result = createOrGetNoAuthAdmin();
+
+		// Log audit event for auto-login
+		try {
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:auto-login-no-auth',
+				eventDetails: `Auto-login in no-auth mode: ${result.user.name}`,
+				ipAddress: ip
+			});
+		} catch (err) {
+			// Audit log failure should not break auth flow
+		}
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -192,6 +235,19 @@ export const loginHandler = createRouter()
 			const result = createUserFromInvite(data.inviteToken, data.name);
 
 			authRateLimiter.recordSuccess(ip);
+
+			// Log audit event for invite acceptance
+			try {
+				auditLogQueries.logEvent({
+					userId: result.user.id,
+					actorUserId: result.user.id,
+					eventType: 'auth:accept-invite',
+					eventDetails: `User ${result.user.name} created account via invite`,
+					ipAddress: ip
+				});
+			} catch (err) {
+				// Audit log failure should not break auth flow
+			}
 
 			// Set auth on connection
 			const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);

@@ -16,7 +16,7 @@
 
 import { Elysia } from 'elysia';
 import { join } from 'node:path';
-import { mkdir, rename, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, rename, stat, unlink } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
@@ -98,6 +98,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response(message, { status: 500 });
 	}
 
+	// Early existence check — fast-path rejection before streaming the body
 	if (await Bun.file(resolvedFinal).exists()) {
 		return new Response('File already exists', { status: 409 });
 	}
@@ -144,12 +145,23 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			return new Response(error instanceof Error ? error.message : 'File too large', { status: 413 });
 		}
 
-		// Race-check: refuse to overwrite if the destination appeared mid-upload.
-		if (await Bun.file(resolvedFinal).exists()) {
+		// Atomic create with O_EXCL — fails if file exists, works on all filesystems
+		// (unlike hard-link which fails on FAT32/exFAT/some network mounts)
+		let finalHandle;
+		try {
+			// 'wx' = O_WRONLY | O_CREAT | O_EXCL (atomic exclusive create)
+			finalHandle = await open(resolvedFinal, 'wx');
+			await finalHandle.close();
+		} catch (error: unknown) {
 			await unlink(tempPath).catch(() => {});
-			return new Response('File already exists', { status: 409 });
+			// EEXIST means another upload won the race
+			if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+				return new Response('File already exists', { status: 409 });
+			}
+			throw error;
 		}
 
+		// Atomic create succeeded — now move temp file over the placeholder
 		await rename(tempPath, resolvedFinal);
 		const stats = await stat(resolvedFinal);
 

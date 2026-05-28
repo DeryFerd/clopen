@@ -16,7 +16,7 @@
 
 import { Elysia } from 'elysia';
 import { join } from 'node:path';
-import { mkdir, open, rename, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, stat, unlink } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
@@ -107,14 +107,20 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response('Request body is empty', { status: 400 });
 	}
 
-	const tempPath = `${resolvedFinal}.${crypto.randomUUID()}.partial`;
-	const writer = Bun.file(tempPath).writer();
-	let written = 0;
+	// Atomic exclusive create — stream directly to final path
+	// 'wx' = O_WRONLY | O_CREAT | O_EXCL (fails immediately if file exists)
+	let finalHandle;
+	try {
+		finalHandle = await open(resolvedFinal, 'wx');
+	} catch (error: unknown) {
+		// EEXIST means another upload won the race
+		if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+			return new Response('File already exists', { status: 409 });
+		}
+		throw error;
+	}
 
-	const cleanupTemp = async () => {
-		try { await writer.end(); } catch { /* best-effort */ }
-		try { await unlink(tempPath); } catch { /* best-effort */ }
-	};
+	let written = 0;
 
 	try {
 		const reader = request.body.getReader();
@@ -124,45 +130,28 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			if (!value) continue;
 			const incoming = value.byteLength;
 			if (written + incoming > fileSizeParam) {
-				await cleanupTemp();
+				await finalHandle.close();
+				await unlink(resolvedFinal).catch(() => {});
 				return new Response('Received more bytes than declared file size', { status: 400 });
 			}
-			writer.write(value);
+			await finalHandle.write(value);
 			written += incoming;
 		}
 
-		await writer.end();
+		await finalHandle.close();
 
 		if (written !== fileSizeParam) {
-			await unlink(tempPath).catch(() => {});
+			await unlink(resolvedFinal).catch(() => {});
 			return new Response(`Incomplete upload: received ${written} of ${fileSizeParam} bytes`, { status: 400 });
 		}
 
 		try {
 			validateFileSize(written);
 		} catch (error) {
-			await unlink(tempPath).catch(() => {});
+			await unlink(resolvedFinal).catch(() => {});
 			return new Response(error instanceof Error ? error.message : 'File too large', { status: 413 });
 		}
 
-		// Atomic create with O_EXCL — fails if file exists, works on all filesystems
-		// (unlike hard-link which fails on FAT32/exFAT/some network mounts)
-		let finalHandle;
-		try {
-			// 'wx' = O_WRONLY | O_CREAT | O_EXCL (atomic exclusive create)
-			finalHandle = await open(resolvedFinal, 'wx');
-			await finalHandle.close();
-		} catch (error: unknown) {
-			await unlink(tempPath).catch(() => {});
-			// EEXIST means another upload won the race
-			if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
-				return new Response('File already exists', { status: 409 });
-			}
-			throw error;
-		}
-
-		// Atomic create succeeded — now move temp file over the placeholder
-		await rename(tempPath, resolvedFinal);
 		const stats = await stat(resolvedFinal);
 
 		return Response.json({
@@ -172,7 +161,8 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			modified: stats.mtime.toISOString()
 		});
 	} catch (error) {
-		await cleanupTemp();
+		try { await finalHandle.close(); } catch { /* best-effort */ }
+		await unlink(resolvedFinal).catch(() => {});
 		debug.error('file', 'HTTP upload error:', error);
 		const message = error instanceof Error ? error.message : 'Upload failed';
 		return new Response(message, { status: 500 });

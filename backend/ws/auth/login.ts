@@ -17,6 +17,7 @@ import { settingsQueries, auditLogQueries } from '$backend/database/queries';
 import { getTokenType } from '$backend/auth/tokens';
 import { authRateLimiter } from '$backend/auth/rate-limiter';
 import { ws } from '$backend/utils/ws';
+import { debug } from '$shared/utils/logger';
 
 const authUserSchema = t.Object({
 	id: t.String(),
@@ -51,7 +52,6 @@ export const loginHandler = createRouter()
 		parsed.authMode = 'required';
 		settingsQueries.set('system:settings', JSON.stringify(parsed));
 
-		// Log audit event for setup
 		try {
 			auditLogQueries.logEvent({
 				userId: result.user.id,
@@ -61,7 +61,7 @@ export const loginHandler = createRouter()
 				ipAddress: ip
 			});
 		} catch (err) {
-			// Audit log failure should not break auth flow
+			debug.log('auth', 'audit log write failed', err);
 		}
 
 		// Set auth on connection
@@ -97,7 +97,6 @@ export const loginHandler = createRouter()
 		// Create or get default admin
 		const result = createOrGetNoAuthAdmin();
 
-		// Log audit event for no-auth setup
 		try {
 			auditLogQueries.logEvent({
 				userId: result.user.id,
@@ -107,7 +106,7 @@ export const loginHandler = createRouter()
 				ipAddress: ip
 			});
 		} catch (err) {
-			// Audit log failure should not break auth flow
+			debug.log('auth', 'audit log write failed', err);
 		}
 
 		// Set auth on connection
@@ -133,7 +132,6 @@ export const loginHandler = createRouter()
 		const ip = ws.getRemoteAddress(conn);
 		const result = createOrGetNoAuthAdmin();
 
-		// Log audit event for auto-login
 		try {
 			auditLogQueries.logEvent({
 				userId: result.user.id,
@@ -143,7 +141,7 @@ export const loginHandler = createRouter()
 				ipAddress: ip
 			});
 		} catch (err) {
-			// Audit log failure should not break auth flow
+			debug.log('auth', 'audit log write failed', err);
 		}
 
 		// Set auth on connection
@@ -236,7 +234,6 @@ export const loginHandler = createRouter()
 
 			authRateLimiter.recordSuccess(ip);
 
-			// Log audit event for invite acceptance
 			try {
 				auditLogQueries.logEvent({
 					userId: result.user.id,
@@ -246,7 +243,7 @@ export const loginHandler = createRouter()
 					ipAddress: ip
 				});
 			} catch (err) {
-				// Audit log failure should not break auth flow
+				debug.log('auth', 'audit log write failed', err);
 			}
 
 			// Set auth on connection

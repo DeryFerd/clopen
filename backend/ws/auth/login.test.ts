@@ -1,102 +1,282 @@
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+
 /**
- * Integration tests for audit log events in auth handlers.
+ * Behavior-based tests for audit logging in session-creation paths.
  * 
- * These tests verify that the four session-creation paths that previously
- * had no audit trail now correctly log events to auth_audit_log:
- * - auth:setup
- * - auth:setup-no-auth
- * - auth:auto-login-no-auth
- * - auth:accept-invite
+ * These tests verify that auditLogQueries.logEvent is called with the correct
+ * parameters for each session-creation handler, rather than checking source code strings.
  */
 
-import { describe, it, expect } from 'bun:test';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+// Mock data
+const mockUser = {
+	id: 'user-123',
+	name: 'Test User',
+	role: 'admin' as const,
+	color: '#FF5733',
+	avatar: 'avatar-url',
+	createdAt: new Date().toISOString()
+};
 
-describe('Auth Login Handlers - Audit Log Integration', () => {
-	const loginFilePath = join(__dirname, 'login.ts');
-	const loginFileContent = readFileSync(loginFilePath, 'utf-8');
+const mockSessionToken = 'session-token-abc123';
+const mockPersonalAccessToken = 'pat-xyz789';
+const mockExpiresAt = new Date(Date.now() + 86400000).toISOString();
+const mockTokenHash = 'hash-abc123';
+const mockIpAddress = '192.168.1.100';
 
-	it('should contain audit log calls for all four session-creation event types', () => {
-		const eventTypes = [
-			'auth:setup',
-			'auth:setup-no-auth',
-			'auth:auto-login-no-auth',
-			'auth:accept-invite'
-		];
+// Track logEvent calls
+let logEventCalls: any[] = [];
+const mockLogEvent = mock((entry: any) => {
+	logEventCalls.push(entry);
+	return true;
+});
 
-		for (const eventType of eventTypes) {
-			expect(loginFileContent).toContain(`eventType: '${eventType}'`);
+// Mock auth-service functions
+const mockCreateAdmin = mock((name: string) => ({
+	user: mockUser,
+	sessionToken: mockSessionToken,
+	personalAccessToken: mockPersonalAccessToken,
+	expiresAt: mockExpiresAt
+}));
+
+const mockCreateOrGetNoAuthAdmin = mock(() => ({
+	user: mockUser,
+	sessionToken: mockSessionToken,
+	expiresAt: mockExpiresAt
+}));
+
+const mockCreateUserFromInvite = mock((inviteToken: string, name: string) => ({
+	user: mockUser,
+	sessionToken: mockSessionToken,
+	personalAccessToken: mockPersonalAccessToken,
+	expiresAt: mockExpiresAt
+}));
+
+const mockNeedsSetup = mock(() => true);
+const mockGetAuthMode = mock(() => 'none');
+
+// Mock settings
+let mockSettings: any = { value: JSON.stringify({ authMode: 'required' }) };
+const mockSettingsGet = mock((key: string) => mockSettings);
+const mockSettingsSet = mock((key: string, value: string) => {
+	mockSettings = { key, value, updated_at: new Date().toISOString() };
+});
+
+// Mock ws utilities
+const mockRawSocket = { remoteAddress: mockIpAddress };
+const mockConnection = { raw: mockRawSocket };
+const mockSetAuth = mock(() => {});
+const mockClearAuth = mock(() => {});
+const mockGetRemoteAddress = mock((conn: any) => mockIpAddress);
+const mockEmitGlobal = mock(() => {});
+
+// Mock token utilities
+const mockHashToken = mock((token: string) => mockTokenHash);
+
+// Setup mocks
+mock.module('$backend/database/queries', () => ({
+	auditLogQueries: {
+		logEvent: mockLogEvent
+	},
+	settingsQueries: {
+		get: mockSettingsGet,
+		set: mockSettingsSet
+	}
+}));
+
+mock.module('$backend/auth/auth-service', () => ({
+	createAdmin: mockCreateAdmin,
+	createOrGetNoAuthAdmin: mockCreateOrGetNoAuthAdmin,
+	createUserFromInvite: mockCreateUserFromInvite,
+	needsSetup: mockNeedsSetup,
+	getAuthMode: mockGetAuthMode,
+	loginWithToken: mock(() => ({})),
+	logout: mock(() => {}),
+	logoutAllSessions: mock(() => 0),
+	validateInviteToken: mock(() => ({ valid: true })),
+	regeneratePAT: mock(() => 'new-pat'),
+	updateUserName: mock(() => mockUser)
+}));
+
+mock.module('$backend/utils/ws', () => ({
+	ws: {
+		setAuth: mockSetAuth,
+		clearAuth: mockClearAuth,
+		getRemoteAddress: mockGetRemoteAddress,
+		emit: {
+			global: mockEmitGlobal
 		}
-	});
+	}
+}));
 
-	it('should call auditLogQueries.logEvent in all four handlers', () => {
-		// Count occurrences of auditLogQueries.logEvent
-		const logEventCalls = loginFileContent.match(/auditLogQueries\.logEvent/g);
+mock.module('$backend/auth/tokens', () => ({
+	hashToken: mockHashToken,
+	getTokenType: mock(() => 'session')
+}));
+
+mock.module('$backend/auth/rate-limiter', () => ({
+	authRateLimiter: {
+		check: mock(() => null),
+		recordSuccess: mock(() => {}),
+		recordFailure: mock(() => {})
+	}
+}));
+
+// Import the handler after mocks are set up
+const { loginHandler } = await import('./login');
+
+describe('Session creation audit logging', () => {
+	beforeEach(() => {
+		// Clear all mock call history
+		logEventCalls = [];
+		mockLogEvent.mockClear();
+		mockCreateAdmin.mockClear();
+		mockCreateOrGetNoAuthAdmin.mockClear();
+		mockCreateUserFromInvite.mockClear();
+		mockSetAuth.mockClear();
+		mockGetRemoteAddress.mockClear();
+		mockEmitGlobal.mockClear();
+		mockHashToken.mockClear();
 		
-		// Should have at least 6 calls: 4 new ones + auth:login + auth:logout + auth:logout-all
-		expect(logEventCalls).toBeTruthy();
-		expect(logEventCalls!.length).toBeGreaterThanOrEqual(6);
+		// Reset settings
+		mockSettings = { value: JSON.stringify({ authMode: 'required' }) };
 	});
 
-	it('should capture IP address using ws.getRemoteAddress in all four new handlers', () => {
-		// Verify IP capture exists near each new event type
-		const eventTypes = [
-			'auth:setup',
-			'auth:setup-no-auth',
-			'auth:auto-login-no-auth',
-			'auth:accept-invite'
-		];
+	test('logs auth:setup event with IP address', async () => {
+		// Call the handler
+		const handler = (loginHandler as any).httpRoutes.get('auth:setup');
+		await handler.handler({
+			data: { name: 'Admin User' },
+			conn: mockConnection
+		});
 
-		for (const eventType of eventTypes) {
-			// Find the section containing this event type
-			const eventIndex = loginFileContent.indexOf(`eventType: '${eventType}'`);
-			expect(eventIndex).toBeGreaterThan(-1);
-			
-			// Check that IP is captured before this event type in the same handler
-			// Look backwards up to 1000 characters to find the IP capture
-			const handlerSection = loginFileContent.substring(Math.max(0, eventIndex - 1000), eventIndex + 200);
-			
-			// IP can be captured either directly in the call or in a variable before
-			const hasIpCapture = handlerSection.includes('ws.getRemoteAddress') || 
-			                     (handlerSection.includes('const ip =') && handlerSection.includes('ipAddress: ip'));
-			expect(hasIpCapture).toBe(true);
-			expect(handlerSection).toContain('ipAddress:');
-		}
+		// Verify createAdmin was called
+		expect(mockCreateAdmin).toHaveBeenCalledWith('Admin User');
+
+		// Verify getRemoteAddress was called to capture IP
+		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
+
+		// Verify logEvent was called with correct parameters
+		expect(mockLogEvent).toHaveBeenCalledTimes(1);
+		expect(logEventCalls[0]).toMatchObject({
+			userId: mockUser.id,
+			actorUserId: mockUser.id,
+			eventType: 'auth:setup',
+			ipAddress: mockIpAddress
+		});
+		expect(logEventCalls[0].eventDetails).toContain('Test User');
+
+		// Verify setAuth was called
+		expect(mockSetAuth).toHaveBeenCalled();
 	});
 
-	it('should wrap audit log calls in try-catch to prevent auth flow breakage', () => {
-		// Count try-catch blocks around auditLogQueries.logEvent calls
-		const auditLogTryCatchBlocks = loginFileContent.match(/try \{[\s\S]*?auditLogQueries\.logEvent[\s\S]*?\} catch/g);
-		
-		// Should have at least 4 try-catch wrapped audit log calls (one for each new handler)
-		expect(auditLogTryCatchBlocks).toBeTruthy();
-		expect(auditLogTryCatchBlocks!.length).toBeGreaterThanOrEqual(4);
+	test('logs auth:setup-no-auth event with IP address', async () => {
+		// Call the handler
+		const handler = (loginHandler as any).httpRoutes.get('auth:setup-no-auth');
+		await handler.handler({
+			data: {},
+			conn: mockConnection
+		});
+
+		// Verify createOrGetNoAuthAdmin was called
+		expect(mockCreateOrGetNoAuthAdmin).toHaveBeenCalled();
+
+		// Verify getRemoteAddress was called to capture IP
+		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
+
+		// Verify logEvent was called with correct parameters
+		expect(mockLogEvent).toHaveBeenCalledTimes(1);
+		expect(logEventCalls[0]).toMatchObject({
+			userId: mockUser.id,
+			actorUserId: mockUser.id,
+			eventType: 'auth:setup-no-auth',
+			ipAddress: mockIpAddress
+		});
+
+		// Verify setAuth was called
+		expect(mockSetAuth).toHaveBeenCalled();
 	});
 
-	it('should include required fields in audit log events', () => {
-		const eventTypes = [
-			'auth:setup',
-			'auth:setup-no-auth',
-			'auth:auto-login-no-auth',
-			'auth:accept-invite'
-		];
+	test('logs auth:auto-login-no-auth event with IP address', async () => {
+		// Call the handler
+		const handler = (loginHandler as any).httpRoutes.get('auth:auto-login-no-auth');
+		await handler.handler({
+			data: {},
+			conn: mockConnection
+		});
 
-		for (const eventType of eventTypes) {
-			// Find the audit log call for this event type
-			const eventIndex = loginFileContent.indexOf(`eventType: '${eventType}'`);
-			expect(eventIndex).toBeGreaterThan(-1);
-			
-			// Get the audit log call section (from auditLogQueries.logEvent to the closing })
-			const callStart = loginFileContent.lastIndexOf('auditLogQueries.logEvent', eventIndex);
-			const callEnd = loginFileContent.indexOf('});', eventIndex);
-			const auditLogCall = loginFileContent.substring(callStart, callEnd + 3);
-			
-			// Verify required fields are present
-			expect(auditLogCall).toContain('userId:');
-			expect(auditLogCall).toContain('actorUserId:');
-			expect(auditLogCall).toContain('eventDetails:');
-			expect(auditLogCall).toContain('ipAddress:');
-		}
+		// Verify createOrGetNoAuthAdmin was called
+		expect(mockCreateOrGetNoAuthAdmin).toHaveBeenCalled();
+
+		// Verify getRemoteAddress was called to capture IP
+		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
+
+		// Verify logEvent was called with correct parameters
+		expect(mockLogEvent).toHaveBeenCalledTimes(1);
+		expect(logEventCalls[0]).toMatchObject({
+			userId: mockUser.id,
+			actorUserId: mockUser.id,
+			eventType: 'auth:auto-login-no-auth',
+			ipAddress: mockIpAddress
+		});
+
+		// Verify setAuth was called
+		expect(mockSetAuth).toHaveBeenCalled();
+	});
+
+	test('logs auth:accept-invite event with IP address', async () => {
+		// Call the handler
+		const handler = (loginHandler as any).httpRoutes.get('auth:accept-invite');
+		await handler.handler({
+			data: {
+				inviteToken: 'invite-token-123',
+				name: 'New User'
+			},
+			conn: mockConnection
+		});
+
+		// Verify createUserFromInvite was called
+		expect(mockCreateUserFromInvite).toHaveBeenCalledWith('invite-token-123', 'New User');
+
+		// Verify getRemoteAddress was called to capture IP
+		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
+
+		// Verify logEvent was called with correct parameters
+		expect(mockLogEvent).toHaveBeenCalledTimes(1);
+		expect(logEventCalls[0]).toMatchObject({
+			userId: mockUser.id,
+			actorUserId: mockUser.id,
+			eventType: 'auth:accept-invite',
+			ipAddress: mockIpAddress
+		});
+
+		// Verify emit.global was called for users-changed event
+		expect(mockEmitGlobal).toHaveBeenCalledWith('auth:users-changed', {
+			type: 'added',
+			userId: mockUser.id
+		});
+
+		// Verify setAuth was called
+		expect(mockSetAuth).toHaveBeenCalled();
+	});
+
+	test('auth flow continues when audit log fails', async () => {
+		// Make logEvent return false (indicating failure)
+		mockLogEvent.mockImplementation(() => false);
+
+		// Call the auth:setup handler
+		const handler = (loginHandler as any).httpRoutes.get('auth:setup');
+		const result = await handler.handler({
+			data: { name: 'Admin User' },
+			conn: mockConnection
+		});
+
+		// Verify the handler completed successfully despite audit log failure
+		expect(result).toBeDefined();
+		expect(result.user).toEqual(mockUser);
+		expect(result.sessionToken).toBe(mockSessionToken);
+		expect(result.personalAccessToken).toBe(mockPersonalAccessToken);
+
+		// Verify setAuth was still called (auth flow continued)
+		expect(mockSetAuth).toHaveBeenCalled();
 	});
 });

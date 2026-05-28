@@ -97,7 +97,10 @@ export const ADMIN_ONLY_ROUTES = new Set([
 	'tunnel:local:ingress:add',
 	'tunnel:local:ingress:remove',
 	'tunnel:local:start',
-	'tunnel:local:stop'
+	'tunnel:local:stop',
+	// Tunnel monitoring — admin-only observability endpoints.
+	'tunnel:monitoring:access-logs',
+	'tunnel:monitoring:statistics'
 ]);
 
 /**

@@ -21,8 +21,9 @@ import {
 	setAuthorizedZone,
 	clearAuthorizedZone
 } from '../../tunnel/tunnel-config';
-import { tunnelAccessLogger } from '../../tunnel/tunnel-access-log';
+import { tunnelAuditLogger } from '../../tunnel/tunnel-audit-logger';
 import { tunnelRateLimiter } from '../../tunnel/tunnel-rate-limiter';
+import { auditLogQueries } from '../../database/queries/audit-log-queries';
 import { debug } from '$shared/utils/logger';
 import { ws } from '$backend/utils/ws';
 
@@ -52,6 +53,7 @@ export const operationsHandler = createRouter()
 	}, async ({ data, conn }) => {
 		const { port, autoStopMinutes = 60 } = data;
 		const userId = ws.getUserId(conn);
+		const ipAddress = ws.getRemoteAddress(conn);
 		
 		// Check rate limit
 		const rateLimit = tunnelRateLimiter.canCreateTunnel(userId);
@@ -63,16 +65,11 @@ export const operationsHandler = createRouter()
 
 		const result = await globalTunnelManager.startQuickTunnel(port, autoStopMinutes);
 		
-		// Record rate limit and access log
+		// Record rate limit and audit log
 		tunnelRateLimiter.recordTunnelCreation(userId);
-		tunnelAccessLogger.log({
-			tunnelType: 'quick',
-			tunnelId: `quick-${port}`,
-			action: 'created',
-			userId,
-			port,
-			publicUrl: result.publicUrl,
-			metadata: { autoStopMinutes }
+		tunnelAuditLogger.logQuickTunnelStart(userId, port, {
+			ipAddress,
+			autoStopMinutes
 		});
 		
 		return result;
@@ -85,17 +82,12 @@ export const operationsHandler = createRouter()
 		response: t.Object({ stopped: t.Boolean() })
 	}, async ({ data, conn }) => {
 		const userId = ws.getUserId(conn);
+		const ipAddress = ws.getRemoteAddress(conn);
 		
 		await globalTunnelManager.stopQuickTunnel(data.port);
 		
-		// Log stop action
-		tunnelAccessLogger.log({
-			tunnelType: 'quick',
-			tunnelId: `quick-${data.port}`,
-			action: 'stopped',
-			userId,
-			port: data.port
-		});
+		// Log audit event
+		tunnelAuditLogger.logQuickTunnelStop(userId, data.port, { ipAddress });
 		
 		return { stopped: true };
 	})
@@ -114,25 +106,13 @@ export const operationsHandler = createRouter()
 		if (!config) throw new Error('Remote tunnel config not found');
 		
 		const userId = ws.getUserId(conn);
-		
-		// Check rate limit
-		const rateLimit = tunnelRateLimiter.canCreateTunnel(userId);
-		if (!rateLimit.allowed) {
-			throw new Error(`Rate limit exceeded. Please try again in ${rateLimit.retryAfter} seconds.`);
-		}
+		const ipAddress = ws.getRemoteAddress(conn);
 
 		debug.log('tunnel', `[WS] Remote tunnel start: ${config.label}, user=${userId}`);
 		const result = await globalTunnelManager.startRemoteTunnel(config);
 		
-		// Record rate limit and access log
-		tunnelRateLimiter.recordTunnelCreation(userId);
-		tunnelAccessLogger.log({
-			tunnelType: 'remote',
-			tunnelId: config.id,
-			action: 'started',
-			userId,
-			metadata: { label: config.label }
-		});
+		// Log audit event
+		tunnelAuditLogger.logRemoteTunnelStart(userId, data.configId, config.label, { ipAddress });
 		
 		return result;
 	})
@@ -144,16 +124,13 @@ export const operationsHandler = createRouter()
 		response: t.Object({ stopped: t.Boolean() })
 	}, async ({ data, conn }) => {
 		const userId = ws.getUserId(conn);
+		const ipAddress = ws.getRemoteAddress(conn);
+		const config = getRemoteTunnelConfigById(data.configId);
 		
 		await globalTunnelManager.stopRemoteTunnel(data.configId);
 		
-		// Log stop action
-		tunnelAccessLogger.log({
-			tunnelType: 'remote',
-			tunnelId: data.configId,
-			action: 'stopped',
-			userId
-		});
+		// Log audit event
+		tunnelAuditLogger.logRemoteTunnelStop(userId, data.configId, config?.label ?? data.configId, { ipAddress });
 		
 		return { stopped: true };
 	})
@@ -344,12 +321,19 @@ export const operationsHandler = createRouter()
 			id: t.String({ minLength: 1 })
 		}),
 		response: t.Any()
-	}, async ({ data }) => {
+	}, async ({ data, conn }) => {
 		const config = getLocalTunnelConfigById(data.id);
 		if (!config) throw new Error('Local tunnel config not found');
 
+		const userId = ws.getUserId(conn);
+		const ipAddress = ws.getRemoteAddress(conn);
+
 		debug.log('tunnel', `[WS] Starting local tunnel: ${config.name}`);
 		const result = await globalTunnelManager.startLocalTunnel(config);
+
+		// Log audit event
+		tunnelAuditLogger.logLocalTunnelStart(userId, data.id, config.name, { ipAddress });
+
 		return result;
 	})
 
@@ -358,8 +342,16 @@ export const operationsHandler = createRouter()
 			id: t.String({ minLength: 1 })
 		}),
 		response: t.Object({ stopped: t.Boolean() })
-	}, async ({ data }) => {
+	}, async ({ data, conn }) => {
+		const config = getLocalTunnelConfigById(data.id);
+		const userId = ws.getUserId(conn);
+		const ipAddress = ws.getRemoteAddress(conn);
+
 		await globalTunnelManager.stopLocalTunnel(data.id);
+
+		// Log audit event
+		tunnelAuditLogger.logLocalTunnelStop(userId, data.id, config?.name ?? data.id, { ipAddress });
+
 		return { stopped: true };
 	})
 
@@ -377,65 +369,93 @@ export const operationsHandler = createRouter()
 	})
 
 	// ═══════════════════════════════════════
-	// Monitoring & Access Control (Admin)
+	// Monitoring (admin-only, gated via ADMIN_ONLY_ROUTES)
 	// ═══════════════════════════════════════
 
-	.http('tunnel:access-logs', {
+	.http('tunnel:monitoring:access-logs', {
 		data: t.Object({
-			limit: t.Optional(t.Number({ minimum: 1, maximum: 1000 }))
+			limit: t.Optional(t.Number({ minimum: 1, maximum: 500 }))
 		}),
 		response: t.Object({
-			logs: t.Array(t.Any())
+			logs: t.Array(t.Object({
+				id: t.String(),
+				userId: t.String(),
+				eventType: t.String(),
+				eventDetails: t.Nullable(t.String()),
+				ipAddress: t.Nullable(t.String()),
+				userAgent: t.Nullable(t.String()),
+				createdAt: t.String()
+			}))
 		})
-	}, async ({ data, conn }) => {
-		// Admin only
-		const role = ws.getRole(conn);
-		if (role !== 'admin') {
-			throw new Error('Access denied: Admin role required');
-		}
-		
-		const logs = tunnelAccessLogger.getRecentLogs(data.limit || 100);
-		return { logs };
+	}, async ({ data }) => {
+		const { limit = 100 } = data;
+		const allLogs = auditLogQueries.getRecentLogs(limit);
+		const tunnelLogs = allLogs
+			.filter((log) => log.event_type.startsWith('tunnel:'))
+			.map((log) => ({
+				id: log.id,
+				userId: log.user_id,
+				eventType: log.event_type,
+				eventDetails: log.event_details,
+				ipAddress: log.ip_address,
+				userAgent: log.user_agent,
+				createdAt: log.created_at
+			}));
+		return { logs: tunnelLogs };
 	})
 
-	.http('tunnel:statistics', {
+	.http('tunnel:monitoring:statistics', {
 		data: t.Object({}),
 		response: t.Object({
 			totalCreated: t.Number(),
-			totalActive: t.Number(),
 			byType: t.Record(t.String(), t.Number()),
 			byUser: t.Record(t.String(), t.Number())
 		})
-	}, async ({ conn }) => {
-		// Admin only
-		const role = ws.getRole(conn);
-		if (role !== 'admin') {
-			throw new Error('Access denied: Admin role required');
+	}, async () => {
+		const tunnelEvents = auditLogQueries.getEventsByType('tunnel:quick:start', 1000)
+			.concat(auditLogQueries.getEventsByType('tunnel:remote:start', 1000))
+			.concat(auditLogQueries.getEventsByType('tunnel:local:start', 1000));
+
+		const byType: Record<string, number> = {};
+		const byUser: Record<string, number> = {};
+
+		for (const event of tunnelEvents) {
+			const details = event.event_details ? JSON.parse(event.event_details) : null;
+			const tunnelType = details?.tunnelType ?? 'unknown';
+			byType[tunnelType] = (byType[tunnelType] ?? 0) + 1;
+			byUser[event.user_id] = (byUser[event.user_id] ?? 0) + 1;
 		}
-		
-		return tunnelAccessLogger.getStatistics();
+
+		return {
+			totalCreated: tunnelEvents.length,
+			byType,
+			byUser
+		};
 	})
 
-	.http('tunnel:rate-limit-status', {
+	.http('tunnel:monitoring:rate-limit-status', {
 		data: t.Object({
 			userId: t.Optional(t.String())
 		}),
 		response: t.Object({
+			userId: t.String(),
 			count: t.Number(),
 			limit: t.Number(),
 			resetAt: t.Nullable(t.Number())
 		})
 	}, async ({ data, conn }) => {
-		const role = ws.getRole(conn);
-		const requestingUserId = ws.getUserId(conn);
-		
-		// Users can check their own status, admins can check any user
-		const targetUserId = data.userId || requestingUserId;
-		if (role !== 'admin' && targetUserId !== requestingUserId) {
-			throw new Error('Access denied: Can only check your own rate limit status');
+		const targetUserId = data.userId ?? ws.getUserId(conn);
+		const callerUserId = ws.getUserId(conn);
+		const callerRole = ws.getRole(conn);
+
+		if (targetUserId !== callerUserId && callerRole !== 'admin') {
+			throw new Error('Admin access required to check other users rate limits');
 		}
-		
-		return tunnelRateLimiter.getStatus(targetUserId);
+
+		return {
+			userId: targetUserId,
+			...tunnelRateLimiter.getStatus(targetUserId)
+		};
 	})
 
 	// ═══════════════════════════════════════

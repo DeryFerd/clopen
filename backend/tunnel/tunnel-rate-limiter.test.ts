@@ -1,4 +1,13 @@
-import { describe, expect, test, beforeEach } from 'bun:test';
+import { describe, expect, test, beforeEach, mock } from 'bun:test';
+
+mock.module('$shared/utils/logger', () => ({
+	debug: {
+		log: mock(() => {}),
+		warn: mock(() => {}),
+		error: mock(() => {})
+	}
+}));
+
 import { tunnelRateLimiter } from './tunnel-rate-limiter';
 
 describe('Tunnel Rate Limiter', () => {

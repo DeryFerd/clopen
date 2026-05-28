@@ -13,8 +13,15 @@ interface RateLimitEntry {
 
 class TunnelRateLimiter {
 	private limits = new Map<string, RateLimitEntry>();
+	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 	private readonly WINDOW_MS = 60 * 60 * 1000; // 1 hour
 	private readonly MAX_TUNNELS_PER_HOUR = 10; // Max 10 tunnels per hour per user
+	private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+	constructor() {
+		this.cleanupTimer = setInterval(() => this.cleanup(), this.CLEANUP_INTERVAL_MS);
+		this.cleanupTimer.unref?.();
+	}
 
 	/**
 	 * Check if user can create a new tunnel
@@ -107,11 +114,16 @@ class TunnelRateLimiter {
 			}
 		}
 	}
+
+	/**
+	 * Dispose of the cleanup timer (for testing)
+	 */
+	dispose(): void {
+		if (this.cleanupTimer) {
+			clearInterval(this.cleanupTimer);
+			this.cleanupTimer = null;
+		}
+	}
 }
 
 export const tunnelRateLimiter = new TunnelRateLimiter();
-
-// Cleanup expired entries every 5 minutes
-setInterval(() => {
-	tunnelRateLimiter.cleanup();
-}, 5 * 60 * 1000);

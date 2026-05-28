@@ -24,8 +24,7 @@ export function up(db: DatabaseConnection): void {
 			user_agent TEXT,
 			success INTEGER NOT NULL DEFAULT 1,
 			error_message TEXT,
-			created_at TEXT NOT NULL,
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			created_at TEXT NOT NULL
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_file_audit_log_user_id ON file_audit_log(user_id);

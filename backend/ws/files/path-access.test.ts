@@ -52,7 +52,7 @@ mock.module('../access', () => ({
 }));
 
 // Import after mocking
-const { requireFilePathAccess, requireSharedFilePathAccess } = await import('./path-access');
+const { requireFilePathAccess, requireSharedFilePathAccess, findContainingProjectId } = await import('./path-access');
 
 let testDir: string;
 
@@ -162,5 +162,64 @@ describe('path-access symlink resolution', () => {
 		const anyPath = join(testDir, 'any', 'path', 'file.txt');
 		const result = await requireFilePathAccess({} as any, anyPath);
 		expect(result).toBe(anyPath);
+	});
+});
+
+describe('findContainingProjectId', () => {
+	let testDir: string;
+
+	beforeEach(async () => {
+		const rawTestDir = join(tmpdir(), `clopen-find-project-test-${randomUUID()}`);
+		await mkdir(rawTestDir, { recursive: true });
+		testDir = await realpath(rawTestDir);
+	});
+
+	afterEach(async () => {
+		await rm(testDir, { recursive: true, force: true });
+	});
+
+	test('returns the id of the project containing the path', async () => {
+		const projectPath = join(testDir, 'project');
+		await mkdir(projectPath, { recursive: true });
+		mockGetAll.mockReturnValue([{ id: 'proj-1', path: projectPath }]);
+
+		const id = await findContainingProjectId(join(projectPath, 'sub', 'file.txt'));
+		expect(id).toBe('proj-1');
+	});
+
+	test('returns null when the path is outside every project', async () => {
+		const projectPath = join(testDir, 'project');
+		await mkdir(projectPath, { recursive: true });
+		mockGetAll.mockReturnValue([{ id: 'proj-1', path: projectPath }]);
+
+		const id = await findContainingProjectId(join(testDir, 'outside', 'file.txt'));
+		expect(id).toBeNull();
+	});
+
+	test('picks the most specific (innermost) project when nested', async () => {
+		const outerPath = join(testDir, 'outer');
+		const innerPath = join(outerPath, 'inner');
+		await mkdir(innerPath, { recursive: true });
+		mockGetAll.mockReturnValue([
+			{ id: 'outer', path: outerPath },
+			{ id: 'inner', path: innerPath },
+		]);
+
+		const id = await findContainingProjectId(join(innerPath, 'file.txt'));
+		expect(id).toBe('inner');
+	});
+
+	test('does not false-match a sibling project sharing a name prefix', async () => {
+		const calc2 = join(testDir, 'calc-2');
+		const calcPro = join(testDir, 'calc-pro');
+		await mkdir(calc2, { recursive: true });
+		await mkdir(calcPro, { recursive: true });
+		mockGetAll.mockReturnValue([
+			{ id: 'calc-2', path: calc2 },
+			{ id: 'calc-pro', path: calcPro },
+		]);
+
+		const id = await findContainingProjectId(join(calc2, 'image.png'));
+		expect(id).toBe('calc-2');
 	});
 });

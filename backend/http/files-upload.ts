@@ -21,15 +21,21 @@ import { mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
 import { authQueries, fileAuditLogQueries } from '../database/queries';
-import { requireFilePathAccessFor } from '../ws/files/path-access';
+import { findContainingProjectId, requireFilePathAccessFor } from '../ws/files/path-access';
 import { validateFileSize } from '../files/file-size-limit';
 
 type AuthIdentity = { userId: string; role: string };
 
-function getClientIp(request: Request): string | undefined {
-	return request.headers.get('x-forwarded-for')?.split(',')[0].trim() 
-		|| request.headers.get('x-real-ip') 
-		|| undefined;
+// Structural subset of Bun's `Server` — just what we need to read the socket
+// address, so we avoid coupling to its generic `Server<WebSocketData>` signature.
+type RequestIpResolver = { requestIP(request: Request): { address: string } | null };
+
+function getClientIp(request: Request, server: RequestIpResolver | null): string | undefined {
+	const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0].trim();
+	if (forwarded) return forwarded;
+	const realIp = request.headers.get('x-real-ip');
+	if (realIp) return realIp;
+	return server?.requestIP(request)?.address ?? undefined;
 }
 
 function authenticate(request: Request): AuthIdentity {
@@ -56,7 +62,7 @@ function authenticate(request: Request): AuthIdentity {
 	return { userId: user.id, role: user.role };
 }
 
-export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ request, query }) => {
+export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ request, query, server }) => {
 	let identity: AuthIdentity;
 	try {
 		identity = authenticate(request);
@@ -77,15 +83,21 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response('Invalid fileSize query parameter', { status: 400 });
 	}
 
+	const ipAddress = getClientIp(request, server);
+	const userAgent = request.headers.get('user-agent') ?? undefined;
+	const projectId = await findContainingProjectId(`${targetPathParam}/${fileNameParam}`);
+
 	try {
 		validateFileSize(fileSizeParam);
 	} catch (error) {
 		fileAuditLogQueries.logOperation({
 			userId: identity.userId,
+			projectId,
 			action: 'upload',
 			filePath: `${targetPathParam}/${fileNameParam}`,
 			fileSize: fileSizeParam,
-			ipAddress: getClientIp(request),
+			ipAddress,
+			userAgent,
 			success: false,
 			errorMessage: 'File too large'
 		});
@@ -102,10 +114,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		const message = error instanceof Error ? error.message : 'Access denied';
 		fileAuditLogQueries.logOperation({
 			userId: identity.userId,
+			projectId,
 			action: 'upload',
 			filePath: `${targetPathParam}/${fileNameParam}`,
 			fileSize: fileSizeParam,
-			ipAddress: getClientIp(request),
+			ipAddress,
+			userAgent,
 			success: false,
 			errorMessage: 'Path access denied'
 		});
@@ -125,10 +139,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 	if (await Bun.file(resolvedFinal).exists()) {
 		fileAuditLogQueries.logOperation({
 			userId: identity.userId,
+			projectId,
 			action: 'upload',
 			filePath: resolvedFinal,
 			fileSize: fileSizeParam,
-			ipAddress: getClientIp(request),
+			ipAddress,
+			userAgent,
 			success: false,
 			errorMessage: 'File already exists'
 		});
@@ -176,10 +192,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			await unlink(tempPath).catch(() => {});
 			fileAuditLogQueries.logOperation({
 				userId: identity.userId,
+				projectId,
 				action: 'upload',
 				filePath: resolvedFinal,
 				fileSize: written,
-				ipAddress: getClientIp(request),
+				ipAddress,
+				userAgent,
 				success: false,
 				errorMessage: 'File too large'
 			});
@@ -191,10 +209,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			await unlink(tempPath).catch(() => {});
 			fileAuditLogQueries.logOperation({
 				userId: identity.userId,
+				projectId,
 				action: 'upload',
 				filePath: resolvedFinal,
 				fileSize: written,
-				ipAddress: getClientIp(request),
+				ipAddress,
+				userAgent,
 				success: false,
 				errorMessage: 'File already exists (race condition)'
 			});
@@ -206,10 +226,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 
 		fileAuditLogQueries.logOperation({
 			userId: identity.userId,
+			projectId,
 			action: 'upload',
 			filePath: resolvedFinal,
 			fileSize: stats.size,
-			ipAddress: getClientIp(request)
+			ipAddress,
+			userAgent
 		});
 
 		return Response.json({
@@ -224,10 +246,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		const message = error instanceof Error ? error.message : 'Upload failed';
 		fileAuditLogQueries.logOperation({
 			userId: identity.userId,
+			projectId,
 			action: 'upload',
 			filePath: resolvedFinal,
 			fileSize: written,
-			ipAddress: getClientIp(request),
+			ipAddress,
+			userAgent,
 			success: false,
 			errorMessage: message
 		});

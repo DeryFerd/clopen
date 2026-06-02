@@ -259,8 +259,9 @@ describe('Session creation audit logging', () => {
 		expect(mockSetAuth).toHaveBeenCalled();
 	});
 
-	test('auth flow continues when audit log fails', async () => {
-		// Make logEvent return false (indicating failure)
+	test('auth flow ignores audit log failure result', async () => {
+		// logEvent signals a failed write with a falsy return (it never throws —
+		// the insert is wrapped internally). The handler must ignore that result.
 		mockLogEvent.mockImplementation(() => false);
 
 		// Call the auth:setup handler

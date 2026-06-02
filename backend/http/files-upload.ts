@@ -22,21 +22,10 @@ import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
 import { authQueries, fileAuditLogQueries } from '../database/queries';
 import { findContainingProjectId, requireFilePathAccessFor } from '../ws/files/path-access';
+import { clientIpFromRequest } from '../utils/client-ip';
 import { validateFileSize } from '../files/file-size-limit';
 
 type AuthIdentity = { userId: string; role: string };
-
-// Structural subset of Bun's `Server` — just what we need to read the socket
-// address, so we avoid coupling to its generic `Server<WebSocketData>` signature.
-type RequestIpResolver = { requestIP(request: Request): { address: string } | null };
-
-function getClientIp(request: Request, server: RequestIpResolver | null): string | undefined {
-	const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0].trim();
-	if (forwarded) return forwarded;
-	const realIp = request.headers.get('x-real-ip');
-	if (realIp) return realIp;
-	return server?.requestIP(request)?.address ?? undefined;
-}
 
 function authenticate(request: Request): AuthIdentity {
 	const header = request.headers.get('authorization') || request.headers.get('Authorization');
@@ -83,7 +72,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response('Invalid fileSize query parameter', { status: 400 });
 	}
 
-	const ipAddress = getClientIp(request, server);
+	const ipAddress = clientIpFromRequest(request, server);
 	const userAgent = request.headers.get('user-agent') ?? undefined;
 	const projectId = await findContainingProjectId(`${targetPathParam}/${fileNameParam}`);
 

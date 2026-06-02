@@ -45,6 +45,13 @@ export interface RestoreConflict {
 	modifiedAt: string;
 	restoreContent?: string;
 	currentContent?: string;
+	/**
+	 * 'cross-session' (default): file was changed by a different session after the
+	 * reference time. 'local': the current on-disk content was never captured by
+	 * this session's snapshots, so restoring would overwrite an unrecoverable
+	 * manual edit.
+	 */
+	reason?: 'cross-session' | 'local';
 }
 
 /**
@@ -147,82 +154,76 @@ export class SnapshotService {
 		messageId: string
 	): Promise<MessageSnapshot> {
 		try {
-			const dirtyFiles = fileWatcher.getDirtyFiles(projectId);
-
 			const previousSnapshots = snapshotQueries.getBySessionId(sessionId);
 			const previousSnapshot = previousSnapshots.length > 0
 				? previousSnapshots[previousSnapshots.length - 1]
 				: null;
 
-			// FAST PATH: no file changes detected → skip snapshot
-			if (dirtyFiles.size === 0 && previousSnapshot) {
-				debug.log('snapshot', 'No file changes detected, skipping snapshot');
-				return previousSnapshot;
-			}
-
-			// Get previous tree (in-memory baseline)
+			// Previous tree (in-memory baseline = disk state at session start or the
+			// last capture/restore).
 			const previousTree = await this.getSessionBaseline(projectPath, sessionId);
 
-			// Build current tree incrementally
-			let currentTree: TreeMap;
+			// The source of truth is the DISK, not the file watcher's dirty set. The
+			// watcher only runs while the Files/Git panel is mounted, so relying on it
+			// silently dropped snapshots whenever the user chatted with those panels
+			// closed (worsened once dock state became per-project). A gitignore-aware
+			// scan + hash diff against the baseline is always correct, and
+			// blobStore.hashFile's mtime+size cache keeps it cheap — only files that
+			// actually changed are re-read.
+			const files = await getSnapshotFiles(projectPath);
+			const currentTree: TreeMap = {};
 			const sessionChanges: SessionScopedChanges = {};
 			const readContents = new Map<string, Buffer>();
+			const seen = new Set<string>();
 
-			if (dirtyFiles.size === 0 && !previousSnapshot) {
-				// First snapshot ever, no dirty files → initial baseline
-				currentTree = { ...previousTree };
-			} else if (dirtyFiles.size > 0) {
-				// Incremental: start from previous tree, update only dirty files
-				currentTree = { ...previousTree };
+			for (const filepath of files) {
+				try {
+					const stat = await fs.stat(filepath);
+					const relativePath = path.relative(projectPath, filepath).replace(/\\/g, '/');
 
-				for (const relativePath of dirtyFiles) {
-					const fullPath = path.join(projectPath, relativePath);
+					// Files over the size cap are never tracked (mirrors the baseline
+					// scan). If one was tracked before, the deletion pass below records
+					// its removal from the tree.
+					if (stat.size > MAX_FILE_SIZE) continue;
 
-					try {
-						const stat = await fs.stat(fullPath);
-						if (stat.size > MAX_FILE_SIZE) {
-							if (currentTree[relativePath]) {
-								const oldHash = currentTree[relativePath];
-								sessionChanges[relativePath] = { oldHash, newHash: '' };
-								delete currentTree[relativePath];
-							}
-							continue;
+					seen.add(relativePath);
+
+					const result = await blobStore.hashFile(relativePath, filepath);
+					const newHash = result.hash;
+					const oldHash = previousTree[relativePath] || '';
+
+					currentTree[relativePath] = newHash;
+
+					if (oldHash !== newHash) {
+						sessionChanges[relativePath] = { oldHash, newHash };
+
+						if (result.content !== null) {
+							readContents.set(relativePath, result.content);
 						}
 
-						const result = await blobStore.hashFile(relativePath, fullPath);
-						const newHash = result.hash;
-						const oldHash = previousTree[relativePath] || '';
-
-						if (oldHash !== newHash) {
-							currentTree[relativePath] = newHash;
-							sessionChanges[relativePath] = { oldHash, newHash };
-
-							if (result.content !== null) {
-								readContents.set(relativePath, result.content);
-							}
-
-							if (oldHash && !(await blobStore.hasBlob(oldHash))) {
-								debug.warn('snapshot', `Old blob missing for ${relativePath} (${oldHash.slice(0, 8)}), restore may be limited`);
-							}
-						}
-					} catch {
-						// File was deleted
-						if (currentTree[relativePath]) {
-							const oldHash = currentTree[relativePath];
-							sessionChanges[relativePath] = { oldHash, newHash: '' };
-							delete currentTree[relativePath];
+						if (oldHash && !(await blobStore.hasBlob(oldHash))) {
+							debug.warn('snapshot', `Old blob missing for ${relativePath} (${oldHash.slice(0, 8)}), restore may be limited`);
 						}
 					}
+				} catch {
+					// Unreadable file — skip it
 				}
-			} else {
-				currentTree = { ...previousTree };
 			}
 
+			// Deletions: anything in the baseline that is no longer on disk.
+			for (const relativePath of Object.keys(previousTree)) {
+				if (!seen.has(relativePath)) {
+					sessionChanges[relativePath] = { oldHash: previousTree[relativePath], newHash: '' };
+				}
+			}
+
+			// The dirty set is no longer the snapshot source, but clear it so it does
+			// not grow unbounded for the Files panel UI.
 			fileWatcher.clearDirtyFiles(projectId);
 
-			// If no actual changes after processing, skip
+			// No changes vs the baseline → reuse the existing head snapshot.
 			if (Object.keys(sessionChanges).length === 0 && previousSnapshot) {
-				debug.log('snapshot', 'No actual file changes after hash comparison, skipping snapshot');
+				debug.log('snapshot', 'No file changes detected (full scan), skipping snapshot');
 				return previousSnapshot;
 			}
 
@@ -301,7 +302,10 @@ export class SnapshotService {
 			return { hasConflicts: false, conflicts: [], checkpointsToUndo: [] };
 		}
 
-		// Filter out files already in expected state on disk (no actual change needed)
+		// Filter out files already in expected state on disk (no actual change needed),
+		// and remember the current on-disk hash of the files that WOULD change so the
+		// local-drift pass below can run without re-reading them.
+		const currentHashByFile = new Map<string, string>();
 		if (projectPath) {
 			for (const [filepath, expectedHash] of expectedState) {
 				const fullPath = path.join(projectPath, filepath);
@@ -315,6 +319,8 @@ export class SnapshotService {
 				}
 				if (currentHash === expectedHash) {
 					expectedState.delete(filepath);
+				} else {
+					currentHashByFile.set(filepath, currentHash);
 				}
 			}
 
@@ -395,6 +401,30 @@ export class SnapshotService {
 		}
 
 		const uniqueConflicts = Array.from(conflictMap.values());
+
+		// Local-drift detection: a file restore would overwrite/delete whose CURRENT
+		// on-disk content was never captured by this session's snapshots. Overwriting
+		// it would lose an unrecoverable manual edit, so surface it as a conflict and
+		// let the user decide. Normal undo/redo never trips this — the working tree's
+		// content there always maps to a captured oldHash/newHash.
+		if (projectPath) {
+			const sessionReferenced = snapshotQueries.collectBlobHashes(sessionSnapshots);
+			const alreadyFlagged = new Set(uniqueConflicts.map(c => c.filepath));
+			for (const [filepath] of expectedState) {
+				if (alreadyFlagged.has(filepath)) continue;
+				const currentHash = currentHashByFile.get(filepath) || '';
+				if (!currentHash) continue; // no file on disk → nothing to lose
+				if (!sessionReferenced.has(currentHash)) {
+					uniqueConflicts.push({
+						filepath,
+						modifiedBySessionId: sessionId,
+						modifiedBySnapshotId: '',
+						modifiedAt: '',
+						reason: 'local'
+					});
+				}
+			}
+		}
 
 		// Populate file contents for diff display
 		if (uniqueConflicts.length > 0 && projectPath) {

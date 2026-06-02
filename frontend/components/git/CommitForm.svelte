@@ -4,7 +4,9 @@
 	import { settings } from '$frontend/stores/features/settings.svelte';
 	import { projectState } from '$frontend/stores/core/projects.svelte';
 	import { showError } from '$frontend/stores/ui/notification.svelte';
+	import { gitDraft, markGitUiDirty } from '$frontend/stores/features/git-workspace.svelte';
 	import ws from '$frontend/utils/ws';
+	import GitMoreMenu, { type GitMoreAction } from '$frontend/components/git/GitMoreMenu.svelte';
 
 	interface Props {
 		stagedCount: number;
@@ -12,14 +14,17 @@
 		onCommit: (message: string) => void;
 		hasRemotes?: boolean;
 		selectedRemote?: string;
+		currentBranch?: string;
 		branchAhead?: number;
 		branchBehind?: number;
 		isPushing?: boolean;
 		isPulling?: boolean;
 		isFetching?: boolean;
+		isMoreBusy?: boolean;
 		onPush?: () => void;
 		onPull?: () => void;
 		onFetch?: () => void;
+		onMoreAction?: (action: GitMoreAction) => void;
 	}
 
 	const {
@@ -28,26 +33,34 @@
 		onCommit,
 		hasRemotes = false,
 		selectedRemote = 'origin',
+		currentBranch,
 		branchAhead = 0,
 		branchBehind = 0,
 		isPushing = false,
 		isPulling = false,
 		isFetching = false,
+		isMoreBusy = false,
 		onPush,
 		onPull,
-		onFetch
+		onFetch,
+		onMoreAction
 	}: Props = $props();
 
 	const showSyncActions = $derived(Boolean(onPush || onPull || onFetch));
 
-	let commitMessage = $state('');
+	// Branch operand shown in the sync-button tooltips (omitted when unknown).
+	const branchRef = $derived(currentBranch ? ` ${currentBranch}` : '');
+
+	// The commit message draft is per-project and lives in the git workspace
+	// store so it survives remounts and is isolated/restored per project.
 	let textareaEl = $state<HTMLTextAreaElement | null>(null);
 	let isGenerating = $state(false);
 
 	function handleCommit() {
-		if (!commitMessage.trim() || stagedCount === 0) return;
-		onCommit(commitMessage.trim());
-		commitMessage = '';
+		if (!gitDraft.commitMessage.trim() || stagedCount === 0) return;
+		onCommit(gitDraft.commitMessage.trim());
+		gitDraft.commitMessage = '';
+		markGitUiDirty();
 		autoResize();
 	}
 
@@ -73,6 +86,8 @@
 
 	function handleInput() {
 		autoResize();
+		// Persist the draft per-project (debounced) so it survives refresh.
+		markGitUiDirty();
 	}
 
 	async function generateCommitMessage() {
@@ -92,7 +107,8 @@
 				modelId: resolvedModel,
 				format
 			});
-			commitMessage = result.message;
+			gitDraft.commitMessage = result.message;
+			markGitUiDirty();
 			await tick();
 			autoResize();
 		} catch (err) {
@@ -108,7 +124,7 @@
 		<div class="flex relative">
 			<textarea
 				bind:this={textareaEl}
-				bind:value={commitMessage}
+				bind:value={gitDraft.commitMessage}
 				placeholder="Commit message..."
 				class="w-full px-2.5 py-2 pr-8 text-sm bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 resize-none outline-none focus:ring-1 focus:ring-violet-500 transition-colors"
 				rows="1"
@@ -139,11 +155,11 @@
 			<button
 				type="button"
 				class="flex items-center justify-center gap-1.5 flex-1 h-7 px-3 border rounded-md text-xs font-medium transition-all duration-150
-					{stagedCount > 0 && commitMessage.trim() && !isCommitting
+					{stagedCount > 0 && gitDraft.commitMessage.trim() && !isCommitting
 						? 'bg-violet-600 border-violet-700 text-white hover:bg-violet-700 cursor-pointer'
 						: 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-600 cursor-not-allowed'}"
 				onclick={handleCommit}
-				disabled={stagedCount === 0 || !commitMessage.trim() || isCommitting}
+				disabled={stagedCount === 0 || !gitDraft.commitMessage.trim() || isCommitting}
 			>
 				{#if isCommitting}
 					<div class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -161,7 +177,7 @@
 					class="relative flex items-center justify-center w-8 h-7 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 cursor-pointer transition-all duration-150 hover:bg-violet-500/10 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800/80 disabled:hover:text-slate-500"
 					onclick={onPush}
 					disabled={isPushing || !hasRemotes || !onPush}
-					title={hasRemotes ? `Push to ${selectedRemote}${branchAhead > 0 ? ` (${branchAhead} ahead)` : ''}` : 'No remote configured'}
+					title={hasRemotes ? `Push${branchAhead > 0 ? ` (${branchAhead} ahead)` : ''} — git push -u ${selectedRemote}${branchRef}` : 'No remote configured'}
 				>
 					{#if isPushing}
 						<div class="w-3.5 h-3.5 border-2 border-slate-300/30 border-t-slate-500 rounded-full animate-spin"></div>
@@ -179,7 +195,7 @@
 					class="relative flex items-center justify-center w-8 h-7 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 cursor-pointer transition-all duration-150 hover:bg-violet-500/10 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800/80 disabled:hover:text-slate-500"
 					onclick={onPull}
 					disabled={isPulling || !hasRemotes || !onPull}
-					title={hasRemotes ? `Pull from ${selectedRemote}${branchBehind > 0 ? ` (${branchBehind} behind)` : ''}` : 'No remote configured'}
+					title={hasRemotes ? `Pull${branchBehind > 0 ? ` (${branchBehind} behind)` : ''} — git pull ${selectedRemote}${branchRef}` : 'No remote configured'}
 				>
 					{#if isPulling}
 						<div class="w-3.5 h-3.5 border-2 border-slate-300/30 border-t-slate-500 rounded-full animate-spin"></div>
@@ -197,7 +213,7 @@
 					class="flex items-center justify-center w-8 h-7 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 cursor-pointer transition-all duration-150 hover:bg-violet-500/10 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800/80 disabled:hover:text-slate-500"
 					onclick={onFetch}
 					disabled={isFetching || !hasRemotes || !onFetch}
-					title={hasRemotes ? `Fetch from ${selectedRemote}` : 'No remote configured'}
+					title={hasRemotes ? `Fetch — git fetch ${selectedRemote} --prune` : 'No remote configured'}
 				>
 					{#if isFetching}
 						<div class="w-3.5 h-3.5 border-2 border-slate-300/30 border-t-slate-500 rounded-full animate-spin"></div>
@@ -205,6 +221,17 @@
 						<Icon name="lucide:cloud-download" class="w-3.5 h-3.5" />
 					{/if}
 				</button>
+			{/if}
+
+			{#if onMoreAction}
+				<!-- More git actions -->
+				<GitMoreMenu
+					disabled={isMoreBusy}
+					{hasRemotes}
+					{selectedRemote}
+					{currentBranch}
+					onAction={onMoreAction}
+				/>
 			{/if}
 		</div>
 	</div>

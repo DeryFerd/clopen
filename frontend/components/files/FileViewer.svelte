@@ -4,11 +4,12 @@
 	import MonacoCodeEditor from '../common/editor/MonacoCodeEditor.svelte';
 	import MediaPreview from '../common/media/MediaPreview.svelte';
 	import MarkdownPreview from '../common/media/MarkdownPreview.svelte';
+	import ImageEditor from './ImageEditor.svelte';
 	import { themeStore } from '$frontend/stores/ui/theme.svelte';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import { getFileIcon } from '$frontend/utils/file-icon-mappings';
 	import { getFolderIcon } from '$frontend/utils/folder-icon-mappings';
-	import { isImageFile, isSvgFile, isPdfFile, isAudioFile, isVideoFile, isBinaryFile, isBinaryContent, isPreviewableFile } from '$frontend/utils/file-type';
+	import { isImageFile, isSvgFile, isPdfFile, isAudioFile, isVideoFile, isBinaryFile, isBinaryContent, isPreviewableFile, isEditableImageFile } from '$frontend/utils/file-type';
 	import { formatFileSize } from '$frontend/utils/format';
 	import { onMount } from 'svelte';
 	import type { IconName } from '$shared/types/ui/icons';
@@ -33,6 +34,7 @@
 		getScrollTop: () => number;
 		setScrollTop: (top: number) => void;
 		onDidScrollChange: (cb: (top: number) => void) => () => void;
+		hasRestoredViewState: () => boolean;
 	}
 
 	interface Props {
@@ -43,7 +45,7 @@
 		error?: string;
 		onSave?: (filePath: string, content: string) => Promise<void>;
 		hideHeader?: boolean;
-		targetLine?: number;
+		target?: { line: number; column?: number; length?: number };
 		onContentChange?: (content: string) => void;
 		wordWrap?: boolean;
 		onToggleWordWrap?: () => void;
@@ -64,7 +66,7 @@
 		error = '',
 		onSave,
 		hideHeader = false,
-		targetLine = undefined,
+		target = undefined,
 		onContentChange,
 		wordWrap = false,
 		onToggleWordWrap,
@@ -97,14 +99,29 @@
 	let isSaving = $state(false);
 	let hasChanges = $state(false);
 
+	// Image editor overlay state. `imageReloadToken` is bumped after an in-place
+	// save so MediaPreview re-fetches the (now changed) file at the same path.
+	let showImageEditor = $state(false);
+	let imageReloadToken = $state(0);
+	const canEditImage = $derived(
+		!!file && file.type === 'file' && isImageFile(file.name) && isEditableImageFile(file.name)
+	);
+
 	// Derived state for save button
 	const canSave = $derived(hasChanges && !isSaving && !!file && !!onSave);
 	const saveButtonDisabled = $derived(!canSave);
 
 	let monacoEditorRef: MonacoEditorComponent | null = $state(null);
 
-	// Line highlighting state
-	let currentDecorations: string[] = $state([]);
+	// Line highlighting state. `currentDecorations` holds Monaco's decoration IDs
+	// so a later deltaDecorations call can remove them — kept as a plain `let`
+	// (NOT $state) because the target $effect both reads and writes it. With
+	// $state, every write inside applyTargetHighlight would re-trigger the
+	// effect, which cancels the just-scheduled fade timer and re-runs the whole
+	// highlight pipeline in a loop.
+	let currentDecorations: string[] = [];
+	let targetHighlightTimer: ReturnType<typeof setTimeout> | null = null;
+	let targetFadeTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Git gutter decorations + HEAD content cache
 	let gutterDecorations: string[] = [];
@@ -231,6 +248,7 @@
 		return () => {
 			window.removeEventListener('keydown', handleKeyDown);
 			if (gutterUpdateTimer) clearTimeout(gutterUpdateTimer);
+			clearTargetTimers();
 			scrollListenerDispose?.();
 			scrollListenerDispose = null;
 			gutterClickDispose?.();
@@ -281,18 +299,25 @@
 				currentFilePath &&
 				currentFilePath !== scrollRestoredForPath &&
 				content &&
-				editorScrollTop > 0
+				editorScrollTop > 0 &&
+				// Don't fight a search-result jump: when a target line is set, the
+				// target effect reveals it. Restoring the saved scroll here (which
+				// can fire AFTER the reveal once content loads late) is exactly what
+				// snapped the editor back to the top.
+				target === undefined &&
+				// Don't fight the editor's own (richer) view-state restore.
+				!monacoEditorRef?.hasRestoredViewState?.()
 			) {
 				scrollRestoredForPath = currentFilePath;
-				const target = editorScrollTop;
+				const restoreTo = editorScrollTop;
 				requestAnimationFrame(() => {
 					requestAnimationFrame(() => {
-						monacoEditorRef?.setScrollTop(target);
+						monacoEditorRef?.setScrollTop(restoreTo);
 					});
 				});
-			} else if (currentFilePath && currentFilePath !== scrollRestoredForPath && editorScrollTop === 0 && content) {
-				// Nothing to restore but mark as resolved so subsequent typing
-				// doesn't re-trigger the check
+			} else if (currentFilePath && currentFilePath !== scrollRestoredForPath && content) {
+				// Nothing to restore (or a target reveal owns positioning) — mark as
+				// resolved so subsequent typing doesn't re-trigger the check.
 				scrollRestoredForPath = currentFilePath;
 			}
 
@@ -816,7 +841,9 @@
 			const top = pendingScrollRestore;
 			pendingScrollRestore = null;
 			requestAnimationFrame(() => editorInstance.setScrollTop(top));
-		} else if (editorScrollTop > 0) {
+		} else if (editorScrollTop > 0 && !monacoEditorRef?.hasRestoredViewState?.()) {
+			// Fallback only: if the editor already restored full view state (scroll +
+			// cursor + folds), don't fight it with a coarser scroll-only restore.
 			requestAnimationFrame(() => editorInstance.setScrollTop(editorScrollTop));
 		}
 
@@ -848,41 +875,116 @@
 		}
 	});
 
-	// Handle line highlighting when targetLine changes
-	$effect(() => {
-		if (targetLine !== undefined && targetLine > 0) {
-			setTimeout(() => {
-				const editor = monacoEditorRef?.getEditor();
-				if (editor) {
-					editor.revealLineInCenter(targetLine);
-
-					const newDecorations = editor.deltaDecorations(currentDecorations, [
-						{
-							range: {
-								startLineNumber: targetLine,
-								startColumn: 1,
-								endLineNumber: targetLine,
-								endColumn: 1
-							},
-							options: {
-								isWholeLine: true,
-								className: 'line-highlight',
-								marginClassName: 'line-highlight-margin'
-							}
-						}
-					]);
-
-					currentDecorations = newDecorations;
-
-					setTimeout(() => {
-						if (editor) {
-							editor.deltaDecorations(currentDecorations, []);
-							currentDecorations = [];
-						}
-					}, 3000);
-				}
-			}, 100);
+	function clearTargetTimers() {
+		if (targetHighlightTimer) {
+			clearTimeout(targetHighlightTimer);
+			targetHighlightTimer = null;
 		}
+		if (targetFadeTimer) {
+			clearTimeout(targetFadeTimer);
+			targetFadeTimer = null;
+		}
+	}
+
+	// Apply line + column highlight for the given target. Returns false when the
+	// editor model isn't ready yet (file content still loading, line out of range),
+	// so the caller can retry — clicking a search result on a not-yet-open file
+	// triggers `target` before `displayContent` finishes loading.
+	function applyTargetHighlight(
+		t: { line: number; column?: number; length?: number },
+		attempt: number
+	): void {
+		const ed = monacoEditorRef?.getEditor();
+		const model = ed?.getModel();
+
+		if (!ed || !model || model.getLineCount() < t.line) {
+			// Retry every 100ms up to ~1.5s while the file finishes loading.
+			if (attempt < 15) {
+				targetHighlightTimer = setTimeout(() => {
+					targetHighlightTimer = null;
+					applyTargetHighlight(t, attempt + 1);
+				}, 100);
+			}
+			return;
+		}
+
+		const lineMaxColumn = model.getLineMaxColumn(t.line);
+		const decos: editor.IModelDeltaDecoration[] = [
+			{
+				range: {
+					startLineNumber: t.line,
+					startColumn: 1,
+					endLineNumber: t.line,
+					endColumn: 1
+				},
+				options: {
+					isWholeLine: true,
+					className: 'line-highlight',
+					marginClassName: 'line-highlight-margin'
+				}
+			}
+		];
+
+		// Clamp the match range so an out-of-bounds column never throws.
+		if (t.column !== undefined && t.column > 0) {
+			const startCol = Math.min(t.column, lineMaxColumn);
+			const matchLen = t.length && t.length > 0 ? t.length : 1;
+			const endCol = Math.min(startCol + matchLen, lineMaxColumn);
+			decos.push({
+				range: {
+					startLineNumber: t.line,
+					startColumn: startCol,
+					endLineNumber: t.line,
+					endColumn: endCol
+				},
+				options: {
+					className: 'match-highlight',
+					overviewRuler: {
+						color: '#facc15',
+						position: OVERVIEW_RULER_RIGHT
+					}
+				}
+			});
+
+			// revealRangeInCenter scrolls both vertically AND horizontally so the
+			// match is visible even when the line is far wider than the viewport.
+			ed.revealRangeInCenter({
+				startLineNumber: t.line,
+				startColumn: startCol,
+				endLineNumber: t.line,
+				endColumn: endCol
+			});
+		} else {
+			ed.revealLineInCenter(t.line);
+		}
+
+		currentDecorations = ed.deltaDecorations(currentDecorations, decos);
+
+		targetFadeTimer = setTimeout(() => {
+			targetFadeTimer = null;
+			const e = monacoEditorRef?.getEditor();
+			if (e) e.deltaDecorations(currentDecorations, []);
+			currentDecorations = [];
+		}, 3000);
+	}
+
+	// Handle line + column highlighting when target changes
+	$effect(() => {
+		// Always cancel any pending highlight/fade from a prior click before
+		// reacting to the new target — a stale fade timer firing later would
+		// wipe the decoration the new click places, and a stale highlight
+		// timer firing after a tab switch would paint the old line/column on
+		// the *new* file's content.
+		clearTargetTimers();
+
+		if (target === undefined || target.line <= 0) return;
+		// Snapshot before timers — `target` may change before the closure fires.
+		const t = { line: target.line, column: target.column, length: target.length };
+
+		targetHighlightTimer = setTimeout(() => {
+			targetHighlightTimer = null;
+			applyTargetHighlight(t, 0);
+		}, 100);
 	});
 
 	// Save changes
@@ -954,17 +1056,39 @@
 		}
 	}
 
-	function downloadFile() {
-		if (file) {
-			if (editableContent) {
-				const blob = new Blob([editableContent], { type: 'text/plain' });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
-				a.download = file.name;
-				a.click();
-				URL.revokeObjectURL(url);
+	function saveBlob(blob: Blob, name: string) {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = name;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
+	async function downloadFile() {
+		if (!file || file.type !== 'file') return;
+
+		// Text/code/SVG/markdown files are held in the editor — download exactly
+		// what the user sees (including any unsaved edits).
+		const isTextFile = !isPreviewableFile(file.name) && !isBinaryFile(file.name) && !isBinary;
+		if (isTextFile && editableContent != null) {
+			saveBlob(new Blob([editableContent], { type: 'text/plain;charset=utf-8' }), file.name);
+			return;
+		}
+
+		// Binary / media files: fetch the original bytes from disk so the download
+		// is byte-for-byte intact. `preview` is omitted so transcodable formats
+		// (TIFF/HEIC) download in their original format, not a PNG copy.
+		try {
+			const response = await ws.http('files:read-content', { path: file.path });
+			const binaryString = atob(response.content);
+			const bytes = new Uint8Array(binaryString.length);
+			for (let i = 0; i < binaryString.length; i++) {
+				bytes[i] = binaryString.charCodeAt(i);
 			}
+			saveBlob(new Blob([bytes], { type: response.contentType || 'application/octet-stream' }), file.name);
+		} catch (err) {
+			debug.error('file', 'Failed to download file:', err);
 		}
 	}
 </script>
@@ -1095,6 +1219,16 @@
 						<Icon name="lucide:download" class="w-4 h-4" />
 					</button>
 				{:else if file && file.type === 'file'}
+					<!-- Edit button for raster images the editor can round-trip -->
+					{#if canEditImage}
+						<button
+							class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-all duration-200"
+							onclick={() => { showImageEditor = true; }}
+							title="Edit image"
+						>
+							<Icon name="lucide:pencil" class="w-3.5 h-3.5" /> Edit
+						</button>
+					{/if}
 					<!-- Non-editable file actions -->
 					<button
 						class="flex p-2 text-slate-600 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 rounded-lg transition-all duration-200"
@@ -1184,7 +1318,14 @@
 					/>
 				{/key}
 			{:else if isPreviewableFile(file.name)}
-				<MediaPreview fileName={file.name} filePath={file.path} />
+				<MediaPreview fileName={file.name} filePath={file.path} reloadToken={imageReloadToken} />
+				{#if showImageEditor && canEditImage}
+					<ImageEditor
+						{file}
+						onClose={() => { showImageEditor = false; }}
+						onSaved={() => { imageReloadToken += 1; }}
+					/>
+				{/if}
 			{:else if isBinary || isBinaryFile(file.name) || isBinaryContent(content)}
 				<div class="flex flex-col items-center justify-center h-full p-8">
 					<Icon name="lucide:file-text" class="w-16 h-16 text-slate-400 mb-4" />
@@ -1524,12 +1665,27 @@
 		background-color: rgba(255, 235, 59, 0.5) !important;
 	}
 
+	/* Inline range highlight for the specific match within a line — sits on top
+	   of .line-highlight so a single line with several matches still calls out
+	   the one the user actually clicked. */
+	:global(.match-highlight) {
+		background-color: rgba(250, 204, 21, 0.55) !important;
+		border-radius: 2px;
+		box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.6);
+		animation: match-fade-out 3s ease-out forwards;
+	}
+
 	:global(.monaco-editor.vs-dark .line-highlight) {
 		background-color: rgba(255, 235, 59, 0.15) !important;
 	}
 
 	:global(.monaco-editor.vs-dark .line-highlight-margin) {
 		background-color: rgba(255, 235, 59, 0.25) !important;
+	}
+
+	:global(.monaco-editor.vs-dark .match-highlight) {
+		background-color: rgba(250, 204, 21, 0.35) !important;
+		box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.55);
 	}
 
 	@keyframes fade-out {
@@ -1541,6 +1697,16 @@
 		}
 	}
 
+	@keyframes match-fade-out {
+		0% {
+			background-color: rgba(250, 204, 21, 0.55);
+		}
+		100% {
+			background-color: transparent;
+			box-shadow: 0 0 0 1px transparent;
+		}
+	}
+
 	:global(.monaco-editor.vs-dark) {
 		@keyframes fade-out {
 			0% {
@@ -1548,6 +1714,15 @@
 			}
 			100% {
 				background-color: transparent;
+			}
+		}
+		@keyframes match-fade-out {
+			0% {
+				background-color: rgba(250, 204, 21, 0.35);
+			}
+			100% {
+				background-color: transparent;
+				box-shadow: 0 0 0 1px transparent;
 			}
 		}
 	}

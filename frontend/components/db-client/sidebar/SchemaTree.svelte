@@ -9,16 +9,19 @@
 	interface Props {
 		connectionId: string;
 		onContextMenu?: (e: MouseEvent, node: DbClientSchemaNode) => void;
+		onScopeMenu?: (e: MouseEvent) => void;
 		onBackToConnections?: () => void;
 		onCreateTable?: (database?: string) => void;
 	}
 
-	const { connectionId, onContextMenu, onBackToConnections, onCreateTable }: Props = $props();
+	const { connectionId, onContextMenu, onScopeMenu, onBackToConnections, onCreateTable }: Props = $props();
 
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let databases = $state<DbClientSchemaNode[]>([]);
-	let currentDb = $state<string | null>(null);
+	// Source of truth lives in the store so the modal (overview, post-action
+	// navigation) and the sidebar agree on which database is open.
+	const currentDb = $derived(dbClientStore.openedDatabase[connectionId] ?? null);
 
 	let createDbOpen = $state(false);
 	let createDbName = $state('');
@@ -41,6 +44,9 @@
 	const canCreateTable = $derived(driver !== 'redis');
 
 	$effect(() => {
+		// Re-run whenever an external action requests a reload (drop/rename/etc.)
+		// — this drives the same fetch path as the manual Refresh button.
+		dbClientStore.schemaNonce;
 		if (!connection) return;
 		if (useDatabaseTree && currentDb === null) {
 			loadDatabases();
@@ -90,12 +96,12 @@
 	}
 
 	function openDatabase(name: string): void {
-		currentDb = name;
+		dbClientStore.setOpenedDatabase(connectionId, name);
 		dbClientStore.setActiveObject(connectionId, null);
 	}
 
 	function backToDatabases(): void {
-		currentDb = null;
+		dbClientStore.setOpenedDatabase(connectionId, null);
 		dbClientStore.setActiveObject(connectionId, null);
 	}
 
@@ -226,6 +232,17 @@
 			>
 				<Icon name={loading ? 'lucide:loader' : 'lucide:refresh-cw'} class="w-3.5 h-3.5 {loading ? 'animate-spin' : ''}" />
 			</button>
+			{#if !showingDatabases && onScopeMenu}
+				<button
+					type="button"
+					class="flex items-center justify-center w-7 h-7 rounded-md text-slate-500 hover:bg-violet-500/10 hover:text-violet-600 transition-colors"
+					onclick={(e) => onScopeMenu?.(e)}
+					aria-label="Database actions"
+					title="Database actions"
+				>
+					<Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
+				</button>
+			{/if}
 		</div>
 	</div>
 

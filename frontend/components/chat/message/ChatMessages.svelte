@@ -14,6 +14,7 @@
 	import { editModeState } from '$frontend/stores/ui/edit-mode.svelte';
 	import { createVirtualScroll, VS_CONFIG_CLASSIC, VS_CONFIG_COMPACT } from '$frontend/utils/chat/virtual-scroll.svelte';
 	import { settings } from '$frontend/stores/features/settings.svelte';
+	import { getChatScroll, setChatScroll } from '$frontend/stores/features/chat-workspace.svelte';
 
 	interface Props {
 		scrollContainer?: HTMLElement | undefined;
@@ -33,6 +34,9 @@
 	let lastSubAgentHash = $state('');
 	// Prevent scroll events from overriding isUserAtBottom during programmatic scroll
 	let scrollLockUntil = 0;
+	// While restoring a saved reading position, suppress the auto-scroll effect so
+	// it can't snap to the bottom before applyInitialScroll positions the anchor.
+	let suppressAutoScroll = false;
 
 	// ========================================
 	// VIRTUAL SCROLL
@@ -136,17 +140,75 @@
 		}
 	}
 
+	// Persist the session's reading position so returning to the project restores
+	// it instead of snapping to the bottom. Uses a message ANCHOR (robust to the
+	// virtual window) rather than a raw scrollTop. Skipped while restoring so a
+	// transient mid-restore position can't overwrite the saved one.
+	function saveReadingPosition(el: HTMLElement) {
+		if (appState.isRestoring || suppressAutoScroll) return;
+		const sid = sessionState.currentSession?.id;
+		if (!sid) return;
+		const { scrollTop, scrollHeight, clientHeight } = el;
+		const atBottom = scrollTop + clientHeight >= scrollHeight - 200;
+		if (atBottom) {
+			setChatScroll(sid, { atBottom: true, anchorMessageId: null, anchorOffset: 0 });
+		} else {
+			const anchor = captureChatAnchor(el);
+			setChatScroll(sid, {
+				atBottom: false,
+				anchorMessageId: anchor?.id ?? null,
+				anchorOffset: anchor?.offset ?? 0
+			});
+		}
+	}
+
+	// Debounced "settle" capture. The scroll lock suppresses the synchronous save
+	// path so programmatic-scroll echoes can't flip isUserAtBottom — but a genuine
+	// user scroll during that window (e.g. scrolling up right after a project
+	// switch restores the chat) must still be remembered, otherwise we keep
+	// persisting the stale restored position. We can't tell echo from gesture
+	// synchronously, so we defer to this capture which reads the FINAL resting
+	// position after any programmatic animation settles: for an untouched
+	// programmatic scroll that's the bottom (correct), and for a user scroll it's
+	// wherever they stopped (correct).
+	let saveScrollTimer: ReturnType<typeof setTimeout> | null = null;
+	function scheduleReadingPositionSave() {
+		if (saveScrollTimer) clearTimeout(saveScrollTimer);
+		saveScrollTimer = setTimeout(() => {
+			saveScrollTimer = null;
+			const el = getScrollEl();
+			if (!el) return;
+			// The lock has expired by now; refresh isUserAtBottom too so live
+			// auto-scroll follows from the user's real position.
+			if (Date.now() >= scrollLockUntil) {
+				const { scrollTop, scrollHeight, clientHeight } = el;
+				isUserAtBottom = scrollTop + clientHeight >= scrollHeight - 200;
+			}
+			saveReadingPosition(el);
+		}, 120);
+	}
+
 	// Scroll detection with bottom position tracking + load more triggers
 	function handleMessagesScroll() {
-		// Don't override isUserAtBottom during/after a programmatic scroll
-		if (Date.now() < scrollLockUntil) return;
-
 		const el = getScrollEl();
 		if (!el) return;
+
+		// While the lock is active we can't trust scroll events to reflect user
+		// intent (they may be echoes of our own programmatic scroll), so leave
+		// isUserAtBottom and load-more untouched — but DO schedule a settle-capture
+		// so a real user scroll during the lock still updates the saved position.
+		if (Date.now() < scrollLockUntil) {
+			scheduleReadingPositionSave();
+			return;
+		}
 
 		const { scrollTop, scrollHeight, clientHeight } = el;
 		const threshold = 200;
 		isUserAtBottom = scrollTop + clientHeight >= scrollHeight - threshold;
+
+		// Remember this session's reading position (synchronous in the common,
+		// unlocked case so a project switch immediately after still flushes it).
+		saveReadingPosition(el);
 
 		if (!vs.isActive) return;
 
@@ -202,7 +264,7 @@
 		const isMessageCountDecreased = currentMessageCount < previousMessageCount;
 
 		// Sync virtual scroll with message count changes
-		if (hasInitiallyScrolled) {
+		if (hasInitiallyScrolled && !suppressAutoScroll) {
 			if (isMessageCountDecreased) {
 				vs.reset(currentMessageCount);
 			} else if (isNewMessage) {
@@ -232,19 +294,20 @@
 		let subAgentChanged = false;
 		let currentSubAgentHash = '';
 
-		// Build a hash of all tool results and sub-agent activities to detect changes
+		// Build a hash of all tool results and sub-agent activities to detect changes.
+		// Tool results are embedded onto the tool_use block (block.result /
+		// block.subActivities) by the grouper, so they never arrive as new entries
+		// in filteredMessages — this hash is the only signal that lets auto-scroll
+		// follow tool output as it streams in.
 		for (const message of filteredMessages) {
-			if ('message' in message) {
-				const messageContent = (message as any).message?.content;
-				if (Array.isArray(messageContent)) {
-					for (const item of messageContent) {
-						if (item?.type === 'tool_use' && item.$result) {
-							currentToolResultsHash += `${item.id}:${JSON.stringify(item.$result).length}|`;
-						}
-						if (item?.type === 'tool_use' && item.$subMessages) {
-							currentSubAgentHash += `${item.id}:${item.$subMessages.length}|`;
-						}
-					}
+			if (!('content' in message) || !Array.isArray(message.content)) continue;
+			for (const item of message.content) {
+				if (item?.type !== 'tool_use') continue;
+				if (item.result) {
+					currentToolResultsHash += `${item.id}:${JSON.stringify(item.result).length}|`;
+				}
+				if (item.subActivities?.length) {
+					currentSubAgentHash += `${item.id}:${item.subActivities.length}|`;
 				}
 			}
 		}
@@ -270,8 +333,18 @@
 			return;
 		}
 
-		// Scroll on new message, partial text changes, tool result changes, or sub-agent updates
-		if ((isNewMessage || partialTextChanged || toolResultChanged || subAgentChanged) && isUserAtBottom) {
+		// Scroll on new message, partial text changes, tool result changes, or sub-agent updates.
+		// Gated on hasInitiallyScrolled so applyInitialScroll() owns the FIRST position:
+		// otherwise, on a full refresh (where appState.isRestoring is never set), this
+		// effect would snap to the bottom before applyInitialScroll() can restore the
+		// saved reading position — clobbering it. After the initial restore, normal
+		// auto-scroll resumes. Mirrors the same guard already used for vs.sync above.
+		if (
+			hasInitiallyScrolled &&
+			(isNewMessage || partialTextChanged || toolResultChanged || subAgentChanged) &&
+			isUserAtBottom &&
+			!suppressAutoScroll
+		) {
 			requestAnimationFrame(() => {
 				if (editModeState.isEditing) return;
 
@@ -328,15 +401,87 @@
 	// RESTORATION & INITIAL SCROLL
 	// ========================================
 
+	// Find the message at the top of the viewport (the anchor) and its pixel
+	// offset from the container top. Cheap: the virtual window renders few nodes.
+	function captureChatAnchor(el: HTMLElement): { id: string; offset: number } | null {
+		const containerTop = el.getBoundingClientRect().top;
+		const nodes = el.querySelectorAll<HTMLElement>('[data-message-id]');
+		for (const node of nodes) {
+			const rect = node.getBoundingClientRect();
+			if (rect.bottom > containerTop + 4) {
+				const id = node.dataset.messageId;
+				if (id) return { id, offset: rect.top - containerTop };
+			}
+		}
+		return null;
+	}
+
+	// Restore the session's saved reading position, or fall back to the bottom.
+	// Only restores when the user had genuinely scrolled up — the common
+	// at-bottom case behaves exactly as before. Async: restoring an anchor may
+	// require expanding the virtual window and waiting for the DOM to render.
+	async function applyInitialScroll(el: HTMLElement) {
+		if (editModeState.isEditing) return;
+		// Lock scroll detection across the (possibly async) positioning so the
+		// scroll events we cause don't flip isUserAtBottom back to true.
+		scrollLockUntil = Date.now() + 800;
+		const sid = sessionState.currentSession?.id;
+		const saved = sid ? getChatScroll(sid) : undefined;
+
+		if (saved && !saved.atBottom && saved.anchorMessageId) {
+			const anchorId = saved.anchorMessageId;
+			const idx = filteredMessages.findIndex(
+				(m) => 'messageId' in m && (m as { messageId?: string }).messageId === anchorId
+			);
+			if (idx >= 0) {
+				isUserAtBottom = false;
+				// Pull the anchor into the virtual window, then wait for it to render.
+				if (vs.isActive) vs.ensureVisible(idx);
+				await tick();
+
+				// Align the anchor to its saved offset, then RE-ALIGN across several
+				// frames. Messages use `content-visibility: auto` with a 200px
+				// intrinsic-size estimate, so those above the anchor are laid out as
+				// short placeholders until they near the viewport — once they render
+				// at their real height (often far more than 200px for long messages)
+				// they shove the anchor away from where we just put it. Each pass
+				// re-measures and corrects until the position stabilizes, keeping the
+				// lock raised so these programmatic scrolls aren't mistaken for user
+				// input.
+				let aligned = false;
+				for (let pass = 0; pass < 12; pass++) {
+					await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+					const anchorEl = el.querySelector<HTMLElement>(`[data-message-id="${anchorId}"]`);
+					if (!anchorEl) break;
+					scrollLockUntil = Date.now() + 800;
+					const offsetNow = anchorEl.getBoundingClientRect().top - el.getBoundingClientRect().top;
+					const delta = offsetNow - saved.anchorOffset;
+					aligned = true;
+					if (Math.abs(delta) <= 1) break;
+					el.scrollTop += delta;
+				}
+				if (aligned) return;
+			}
+		}
+
+		// Default / fallback: pin to the bottom.
+		el.scrollTop = el.scrollHeight;
+		isUserAtBottom = true;
+	}
+
 	// Handle restoration and initial scroll
 	$effect(() => {
 		const currentMessages = filteredMessages.length;
 		const isRestoring = appState.isRestoring;
 
 		if (isRestoring) {
-			// Keep content hidden during restoration
+			// Keep content hidden during restoration. Crucially, suppress the
+			// auto-scroll effect NOW (it runs before this effect): otherwise, when
+			// the new session's messages load, it would snap to the bottom before
+			// applyInitialScroll gets a chance to restore the saved position.
 			isContentReady = false;
 			hasInitiallyScrolled = false;
+			suppressAutoScroll = true;
 			return;
 		}
 
@@ -351,30 +496,34 @@
 				// Initialize virtual scroll
 				vs.reset(currentMessages);
 
-				// Scroll to bottom immediately (while still hidden)
-				// Skip if edit mode is active - scroll-to-edit-message will handle positioning
-				if (!editModeState.isEditing) {
-					el.scrollTop = el.scrollHeight;
-				}
-
-				// Show content after a micro delay to ensure scroll is set
-				requestAnimationFrame(() => {
-					isContentReady = true;
+				// Restore the saved reading position (or bottom) while still hidden,
+				// then reveal + re-enable auto-scroll once positioned.
+				applyInitialScroll(el).then(() => {
+					suppressAutoScroll = false;
+					requestAnimationFrame(() => {
+						isContentReady = true;
+					});
 				});
 			} else if (currentMessages === 0) {
 				// No messages, show immediately
 				isContentReady = true;
 				hasInitiallyScrolled = true;
+				suppressAutoScroll = false;
 			} else {
 				// Wait for container
 				setTimeout(() => {
 					const el2 = getScrollEl();
 					if (el2) {
 						vs.reset(filteredMessages.length);
-						el2.scrollTop = el2.scrollHeight;
 						hasInitiallyScrolled = true;
+						applyInitialScroll(el2).then(() => {
+							suppressAutoScroll = false;
+							isContentReady = true;
+						});
+					} else {
+						suppressAutoScroll = false;
+						isContentReady = true;
 					}
-					isContentReady = true;
 				}, 50);
 			}
 		}
@@ -529,6 +678,7 @@
 			if (currentListenerEl) {
 				currentListenerEl.removeEventListener('scroll', handleMessagesScroll);
 			}
+			if (saveScrollTimer) clearTimeout(saveScrollTimer);
 			hasInitiallyScrolled = false;
 		};
 	});

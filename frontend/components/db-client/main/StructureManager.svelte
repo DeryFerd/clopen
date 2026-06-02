@@ -61,10 +61,18 @@
 	});
 
 	async function doRename(): Promise<void> {
-		if (!renameValue) return;
+		if (!renameValue || renameValue === objectName) return;
 		try {
 			await dbClientStore.renameTable(connectionId, objectName, renameValue, { database, schema });
-			await load();
+			// Point the active object at the new name (this re-drives load via the
+			// effect) and refresh the sidebar so the rename is reflected there too.
+			dbClientStore.setActiveObject(connectionId, {
+				name: renameValue,
+				type: driver === 'mongodb' ? 'collection' : 'table',
+				database,
+				schema
+			});
+			dbClientStore.requestSchemaReload();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		}
@@ -82,6 +90,10 @@
 	async function doDrop(): Promise<void> {
 		try {
 			await dbClientStore.dropTable(connectionId, objectName, { database, schema });
+			// Clear the now-gone object and refresh the sidebar so the dropped
+			// table disappears from the navigation list immediately.
+			dbClientStore.setActiveObject(connectionId, null);
+			dbClientStore.requestSchemaReload();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		}
@@ -227,8 +239,8 @@
 				</button>
 			</div>
 			<div class="border border-slate-200 dark:border-slate-800 rounded overflow-hidden">
-				<table class="w-full text-sm">
-					<thead class="bg-slate-100 dark:bg-slate-900">
+				<table class="w-full text-sm bg-slate-50 dark:bg-slate-800/50">
+					<thead class="bg-slate-200 dark:bg-slate-800">
 						<tr>
 							<th class="px-3 py-1.5 text-left font-semibold">Name</th>
 							<th class="px-3 py-1.5 text-left font-semibold">Type</th>
@@ -240,7 +252,7 @@
 					</thead>
 					<tbody>
 						{#each details?.columns ?? [] as col (col.name)}
-							<tr class="border-t border-slate-100 dark:border-slate-900">
+							<tr class="border-t border-slate-100 dark:border-slate-800">
 								<td class="px-3 py-1.5">{col.name}</td>
 								<td class="px-3 py-1.5 text-slate-500">{col.type}</td>
 								<td class="px-3 py-1.5">{col.nullable ? 'YES' : 'NO'}</td>
@@ -292,8 +304,8 @@
 				</button>
 			</div>
 			<div class="border border-slate-200 dark:border-slate-800 rounded overflow-hidden">
-				<table class="w-full text-sm">
-					<thead class="bg-slate-100 dark:bg-slate-900">
+				<table class="w-full text-sm bg-slate-50 dark:bg-slate-800/50">
+					<thead class="bg-slate-200 dark:bg-slate-800">
 						<tr>
 							<th class="px-3 py-1.5 text-left font-semibold">Name</th>
 							<th class="px-3 py-1.5 text-left font-semibold">Columns</th>
@@ -303,7 +315,7 @@
 					</thead>
 					<tbody>
 						{#each details?.indexes ?? [] as ix (ix.name)}
-							<tr class="border-t border-slate-100 dark:border-slate-900">
+							<tr class="border-t border-slate-100 dark:border-slate-800">
 								<td class="px-3 py-1.5">{ix.name}</td>
 								<td class="px-3 py-1.5 text-slate-500">{ix.columns.join(', ')}</td>
 								<td class="px-3 py-1.5">{ix.unique ? 'YES' : ''}</td>
@@ -330,8 +342,8 @@
 			<section>
 				<h3 class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Foreign keys</h3>
 				<div class="border border-slate-200 dark:border-slate-800 rounded overflow-hidden">
-					<table class="w-full text-sm">
-						<thead class="bg-slate-100 dark:bg-slate-900">
+					<table class="w-full text-sm bg-slate-50 dark:bg-slate-800/50">
+						<thead class="bg-slate-200 dark:bg-slate-800">
 							<tr>
 								<th class="px-3 py-1.5 text-left font-semibold">Column</th>
 								<th class="px-3 py-1.5 text-left font-semibold">References</th>
@@ -339,7 +351,7 @@
 						</thead>
 						<tbody>
 							{#each details.foreignKeys as fk (fk.column + fk.refTable)}
-								<tr class="border-t border-slate-100 dark:border-slate-900">
+								<tr class="border-t border-slate-100 dark:border-slate-800">
 									<td class="px-3 py-1.5">{fk.column}</td>
 									<td class="px-3 py-1.5 text-slate-500">{fk.refTable}.{fk.refColumn}</td>
 								</tr>

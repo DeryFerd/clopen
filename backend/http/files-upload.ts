@@ -80,20 +80,15 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 	try {
 		validateFileSize(fileSizeParam);
 	} catch (error) {
-		// Log failed upload due to file size validation
-		try {
-			fileAuditLogQueries.logOperation({
-				userId: identity.userId,
-				action: 'upload',
-				filePath: `${targetPathParam}/${fileNameParam}`,
-				fileSize: fileSizeParam,
-				ipAddress: getClientIp(request),
-				success: false,
-				errorMessage: 'File too large'
-			});
-		} catch (err) {
-			debug.error('file', 'Failed to log upload failure', err);
-		}
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			action: 'upload',
+			filePath: `${targetPathParam}/${fileNameParam}`,
+			fileSize: fileSizeParam,
+			ipAddress: getClientIp(request),
+			success: false,
+			errorMessage: 'File too large'
+		});
 		return new Response(error instanceof Error ? error.message : 'Invalid file size', { status: 413 });
 	}
 
@@ -105,20 +100,15 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		resolvedFinal = await requireFilePathAccessFor(tentativeFinal, identity.role, identity.userId);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Access denied';
-		// Log failed upload due to path access denied
-		try {
-			fileAuditLogQueries.logOperation({
-				userId: identity.userId,
-				action: 'upload',
-				filePath: `${targetPathParam}/${fileNameParam}`,
-				fileSize: fileSizeParam,
-				ipAddress: getClientIp(request),
-				success: false,
-				errorMessage: 'Path access denied'
-			});
-		} catch (err) {
-			debug.error('file', 'Failed to log upload failure', err);
-		}
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			action: 'upload',
+			filePath: `${targetPathParam}/${fileNameParam}`,
+			fileSize: fileSizeParam,
+			ipAddress: getClientIp(request),
+			success: false,
+			errorMessage: 'Path access denied'
+		});
 		return new Response(message, { status: 403 });
 	}
 
@@ -133,20 +123,15 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 	}
 
 	if (await Bun.file(resolvedFinal).exists()) {
-		// Log failed upload due to file already exists (early check)
-		try {
-			fileAuditLogQueries.logOperation({
-				userId: identity.userId,
-				action: 'upload',
-				filePath: resolvedFinal,
-				fileSize: fileSizeParam,
-				ipAddress: getClientIp(request),
-				success: false,
-				errorMessage: 'File already exists'
-			});
-		} catch (err) {
-			debug.error('file', 'Failed to log upload failure', err);
-		}
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			action: 'upload',
+			filePath: resolvedFinal,
+			fileSize: fileSizeParam,
+			ipAddress: getClientIp(request),
+			success: false,
+			errorMessage: 'File already exists'
+		});
 		return new Response('File already exists', { status: 409 });
 	}
 
@@ -189,40 +174,30 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			validateFileSize(written);
 		} catch (error) {
 			await unlink(tempPath).catch(() => {});
-			// Log failed upload due to post-upload size validation
-			try {
-				fileAuditLogQueries.logOperation({
-					userId: identity.userId,
-					action: 'upload',
-					filePath: resolvedFinal,
-					fileSize: written,
-					ipAddress: getClientIp(request),
-					success: false,
-					errorMessage: 'File too large'
-				});
-			} catch (err) {
-				debug.error('file', 'Failed to log upload failure', err);
-			}
+			fileAuditLogQueries.logOperation({
+				userId: identity.userId,
+				action: 'upload',
+				filePath: resolvedFinal,
+				fileSize: written,
+				ipAddress: getClientIp(request),
+				success: false,
+				errorMessage: 'File too large'
+			});
 			return new Response(error instanceof Error ? error.message : 'File too large', { status: 413 });
 		}
 
 		// Race-check: refuse to overwrite if the destination appeared mid-upload.
 		if (await Bun.file(resolvedFinal).exists()) {
 			await unlink(tempPath).catch(() => {});
-			// Log failed upload due to file already exists (race condition)
-			try {
-				fileAuditLogQueries.logOperation({
-					userId: identity.userId,
-					action: 'upload',
-					filePath: resolvedFinal,
-					fileSize: written,
-					ipAddress: getClientIp(request),
-					success: false,
-					errorMessage: 'File already exists (race condition)'
-				});
-			} catch (err) {
-				debug.error('file', 'Failed to log upload failure', err);
-			}
+			fileAuditLogQueries.logOperation({
+				userId: identity.userId,
+				action: 'upload',
+				filePath: resolvedFinal,
+				fileSize: written,
+				ipAddress: getClientIp(request),
+				success: false,
+				errorMessage: 'File already exists (race condition)'
+			});
 			return new Response('File already exists', { status: 409 });
 		}
 
@@ -247,20 +222,15 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		await cleanupTemp();
 		debug.error('file', 'HTTP upload error:', error);
 		const message = error instanceof Error ? error.message : 'Upload failed';
-		// Log failed upload due to internal server error
-		try {
-			fileAuditLogQueries.logOperation({
-				userId: identity.userId,
-				action: 'upload',
-				filePath: resolvedFinal,
-				fileSize: written,
-				ipAddress: getClientIp(request),
-				success: false,
-				errorMessage: message
-			});
-		} catch (err) {
-			debug.error('file', 'Failed to log upload failure', err);
-		}
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			action: 'upload',
+			filePath: resolvedFinal,
+			fileSize: written,
+			ipAddress: getClientIp(request),
+			success: false,
+			errorMessage: message
+		});
 		return new Response(message, { status: 500 });
 	}
 });

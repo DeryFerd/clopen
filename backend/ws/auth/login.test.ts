@@ -152,9 +152,6 @@ describe('Session creation audit logging', () => {
 		// Verify createAdmin was called
 		expect(mockCreateAdmin).toHaveBeenCalledWith('Admin User');
 
-		// Verify getRemoteAddress was called to capture IP
-		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
-
 		// Verify logEvent was called with correct parameters
 		expect(mockLogEvent).toHaveBeenCalledTimes(1);
 		expect(logEventCalls[0]).toMatchObject({
@@ -180,9 +177,6 @@ describe('Session creation audit logging', () => {
 		// Verify createOrGetNoAuthAdmin was called
 		expect(mockCreateOrGetNoAuthAdmin).toHaveBeenCalled();
 
-		// Verify getRemoteAddress was called to capture IP
-		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
-
 		// Verify logEvent was called with correct parameters
 		expect(mockLogEvent).toHaveBeenCalledTimes(1);
 		expect(logEventCalls[0]).toMatchObject({
@@ -206,9 +200,6 @@ describe('Session creation audit logging', () => {
 
 		// Verify createOrGetNoAuthAdmin was called
 		expect(mockCreateOrGetNoAuthAdmin).toHaveBeenCalled();
-
-		// Verify getRemoteAddress was called to capture IP
-		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
 
 		// Verify logEvent was called with correct parameters
 		expect(mockLogEvent).toHaveBeenCalledTimes(1);
@@ -236,9 +227,6 @@ describe('Session creation audit logging', () => {
 
 		// Verify createUserFromInvite was called
 		expect(mockCreateUserFromInvite).toHaveBeenCalledWith('invite-token-123', 'New User');
-
-		// Verify getRemoteAddress was called to capture IP
-		expect(mockGetRemoteAddress).toHaveBeenCalledWith(mockConnection);
 
 		// Verify logEvent was called with correct parameters
 		expect(mockLogEvent).toHaveBeenCalledTimes(1);

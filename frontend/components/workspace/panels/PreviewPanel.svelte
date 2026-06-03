@@ -5,7 +5,13 @@
 	import { debug } from '$shared/utils/logger';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import type { DeviceSize, Rotation } from '$frontend/utils/preview-constants';
-	import { getProjectPreviewState, setProjectPreviewState } from '$frontend/utils/preview-project-state';
+	import {
+		getProjectPreviewState,
+		setProjectPreviewState,
+		setPreviewSnapshotProvider
+	} from '$frontend/utils/preview-project-state';
+	import { requestWorkspaceSave } from '$frontend/stores/ui/project-workspace.svelte';
+	import { appState } from '$frontend/stores/core/app.svelte';
 
 	// Project-aware state
 	const hasActiveProject = $derived(projectState.currentProject !== null);
@@ -51,11 +57,15 @@
 	// Save and restore preview state when project changes
 	$effect(() => {
 		if (hasActiveProject && projectId) {
-			// Save current project state before switching
+			// Save current project state before switching.
+			// NOTE: `url` is intentionally NOT persisted/restored here. Tabs (and
+			// their URLs) are owned by the preview-tabs dock; the active tab's URL
+			// flows back through onUrlChange. Restoring a URL here would feed
+			// BrowserPreview's URL-watcher and spawn a duplicate tab on every
+			// switch, racing the dock's recovery.
 			if (lastProjectId && lastProjectId !== projectId) {
 				setProjectPreviewState(lastProjectId, {
 					isOpen,
-					url,
 					mode,
 					deviceSize,
 					rotation
@@ -67,7 +77,6 @@
 			const savedState = getProjectPreviewState(projectId);
 			if (savedState) {
 				isOpen = savedState.isOpen;
-				url = savedState.url;
 				mode = savedState.mode;
 				deviceSize = savedState.deviceSize;
 				rotation = savedState.rotation;
@@ -75,7 +84,6 @@
 			} else {
 				// Reset state for new project
 				isOpen = true;
-				url = '';
 				mode = 'split';
 				deviceSize = 'laptop';
 				rotation = 'portrait';
@@ -86,12 +94,31 @@
 		} else {
 			// No active project - reset everything
 			isOpen = true;
-			url = '';
 			mode = 'split';
 			deviceSize = 'laptop';
 			rotation = 'portrait';
 			lastProjectId = '';
 		}
+	});
+
+	// Expose live preview prefs to the workspace coordinator so a switch flushes
+	// the leaving project's prefs to the server accurately.
+	$effect(() => {
+		setPreviewSnapshotProvider(() => ({ isOpen, mode, deviceSize, rotation }));
+		return () => setPreviewSnapshotProvider(null);
+	});
+
+	// Persist in-place pref changes (device/rotation/url/mode) to the server,
+	// debounced. Skipped during a project switch (those are restores, not edits).
+	$effect(() => {
+		// Track the persisted fields.
+		void isOpen;
+		void url;
+		void mode;
+		void deviceSize;
+		void rotation;
+		if (!hasActiveProject || appState.isSwitching) return;
+		requestWorkspaceSave();
 	});
 
 	// Export actions for DesktopPanel header

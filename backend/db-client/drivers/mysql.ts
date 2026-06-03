@@ -10,6 +10,7 @@ import type {
 	DbClientObjectDetails,
 	DbClientObjectForeignKey,
 	DbClientObjectIndex,
+	DbClientOverview,
 	DbClientQueryResult,
 	DbClientSchemaNode,
 	DbClientSchemaNodeType
@@ -42,7 +43,12 @@ export class MysqlAdapter implements DbClientDriverAdapter {
 
 	private sql: SQL | null = null;
 	private alive = false;
+	// The session's currently-USEd database (mutated by ensureDatabase).
 	private defaultDb: string | null = null;
+	// The connection's configured database — immutable, used as the scope
+	// fallback so a connection-level overview never resolves to the last-browsed
+	// database that only the session happens to be sitting on.
+	private configuredDb: string | null = null;
 
 	async connect(conn: DbClientConnection, tunnelPort?: number): Promise<void> {
 		const host = tunnelPort ? '127.0.0.1' : (conn.host ?? '127.0.0.1');
@@ -56,6 +62,7 @@ export class MysqlAdapter implements DbClientDriverAdapter {
 		this.sql = new SQL(url);
 		await this.sql.connect();
 		this.defaultDb = conn.database || null;
+		this.configuredDb = conn.database || null;
 		this.alive = true;
 	}
 
@@ -103,7 +110,8 @@ export class MysqlAdapter implements DbClientDriverAdapter {
 	}
 
 	private targetDb(opts?: SchemaOpts): string | undefined {
-		return opts?.database || this.defaultDb || undefined;
+		// Fall back to the configured database, never the session's last-USEd one.
+		return opts?.database || this.configuredDb || undefined;
 	}
 
 	private async ensureDatabase(database?: string): Promise<void> {
@@ -129,6 +137,54 @@ export class MysqlAdapter implements DbClientDriverAdapter {
 
 	async explain(q: string, opts?: { database?: string }): Promise<DbClientQueryResult> {
 		return this.executeRead(`EXPLAIN ${q}`, [], opts);
+	}
+
+	// ── Overview ──────────────────────────────────────────────────────────
+
+	async overview(opts?: SchemaOpts): Promise<DbClientOverview> {
+		const sql = this.requireSql();
+		const start = performance.now();
+		const verRows = (await sql.unsafe('SELECT VERSION() AS v')) as Array<{ v: string }>;
+		const latencyMs = Math.round(performance.now() - start);
+		const target = this.targetDb(opts);
+		if (!target) {
+			// Connection level — aggregate across all user databases on the server.
+			const rows = (await sql.unsafe(
+				`SELECT
+				   COUNT(DISTINCT table_schema) AS dbs,
+				   SUM(data_length + index_length) AS size,
+				   SUM(table_type = 'BASE TABLE') AS tables,
+				   SUM(table_type = 'VIEW') AS views
+				 FROM information_schema.tables
+				 WHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')`
+			)) as Array<Record<string, unknown>>;
+			const r = rows[0] ?? {};
+			return {
+				serverVersion: verRows[0]?.v ?? null,
+				latencyMs,
+				sizeBytes: r.size === null || r.size === undefined ? null : Number(r.size),
+				tableCount: r.tables === null || r.tables === undefined ? null : Number(r.tables),
+				viewCount: r.views === null || r.views === undefined ? null : Number(r.views),
+				extra: [{ label: 'Databases', value: String(r.dbs === null || r.dbs === undefined ? 0 : Number(r.dbs)) }]
+			};
+		}
+		const rows = (await sql.unsafe(
+			`SELECT
+			   SUM(data_length + index_length) AS size,
+			   SUM(table_type = 'BASE TABLE') AS tables,
+			   SUM(table_type = 'VIEW') AS views
+			 FROM information_schema.tables WHERE table_schema = ?`,
+			[target] as never
+		)) as Array<Record<string, unknown>>;
+		const r = rows[0] ?? {};
+		return {
+			serverVersion: verRows[0]?.v ?? null,
+			latencyMs,
+			sizeBytes: r.size === null || r.size === undefined ? null : Number(r.size),
+			tableCount: r.tables === null || r.tables === undefined ? null : Number(r.tables),
+			viewCount: r.views === null || r.views === undefined ? null : Number(r.views),
+			extra: [{ label: 'Database', value: target }]
+		};
 	}
 
 	// ── Schema ────────────────────────────────────────────────────────────
@@ -228,6 +284,89 @@ export class MysqlAdapter implements DbClientDriverAdapter {
 		const ddl = `CREATE DATABASE ${Q(name)}`;
 		await this.requireSql().unsafe(ddl);
 		return ddl;
+	}
+
+	async dropDatabase(name: string): Promise<string> {
+		assertSafeIdentifier(name);
+		const ddl = `DROP DATABASE ${Q(name)}`;
+		await this.requireSql().unsafe(ddl);
+		if (this.defaultDb === name) this.defaultDb = null;
+		return ddl;
+	}
+
+	async renameDatabase(name: string, newName: string): Promise<string> {
+		// MySQL has no RENAME DATABASE. Create the target, move every base table
+		// into it (RENAME TABLE moves data instantly, no copy), then drop the old
+		// one. Tables (and their data) are migrated losslessly.
+		assertSafeIdentifier(name);
+		assertSafeIdentifier(newName);
+		const sql = this.requireSql();
+		await sql.unsafe(`CREATE DATABASE ${Q(newName)}`);
+		const rows = (await sql.unsafe(
+			"SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+			[name] as never
+		)) as Array<{ TABLE_NAME: string }>;
+		for (const r of rows) {
+			assertSafeIdentifier(r.TABLE_NAME);
+			await sql.unsafe(`RENAME TABLE ${qualified(Q, [name, r.TABLE_NAME])} TO ${qualified(Q, [newName, r.TABLE_NAME])}`);
+		}
+		await sql.unsafe(`DROP DATABASE ${Q(name)}`);
+		// Force a fresh `USE` on next access — the session's selected db is gone.
+		if (this.defaultDb === name) this.defaultDb = null;
+		return `CREATE DATABASE ${Q(newName)}; RENAME TABLE …; DROP DATABASE ${Q(name)}`;
+	}
+
+	async resetDatabase(opts?: SchemaOpts): Promise<string> {
+		const target = this.targetDb(opts);
+		if (!target) throw new Error('MySQL: database is required');
+		const sql = this.requireSql();
+		const rows = (await sql.unsafe(
+			"SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+			[target] as never
+		)) as Array<{ TABLE_NAME: string }>;
+		if (rows.length === 0) return '-- no tables to empty';
+		rows.forEach((r) => assertSafeIdentifier(r.TABLE_NAME));
+		const statements = rows.map((r) => `TRUNCATE TABLE ${qualified(Q, [target, r.TABLE_NAME])}`);
+		await sql.unsafe('SET FOREIGN_KEY_CHECKS = 0');
+		try {
+			for (const stmt of statements) await sql.unsafe(stmt);
+		} finally {
+			await sql.unsafe('SET FOREIGN_KEY_CHECKS = 1');
+		}
+		return statements.join(';\n');
+	}
+
+	async resetTable(name: string, opts?: SchemaOpts): Promise<string> {
+		// MySQL TRUNCATE already resets AUTO_INCREMENT.
+		return this.truncateTable(name, opts);
+	}
+
+	async duplicateTable(name: string, newName: string, opts?: (SchemaOpts & { withData?: boolean })): Promise<string> {
+		assertSafeIdentifier(name);
+		assertSafeIdentifier(newName);
+		const db = this.targetDb(opts);
+		const src = qualified(Q, [db, name]);
+		const dst = qualified(Q, [db, newName]);
+		const sql = this.requireSql();
+		const create = `CREATE TABLE ${dst} LIKE ${src}`;
+		await sql.unsafe(create);
+		const statements = [create];
+		if (opts?.withData) {
+			const copy = `INSERT INTO ${dst} SELECT * FROM ${src}`;
+			await sql.unsafe(copy);
+			statements.push(copy);
+		}
+		return statements.join(';\n');
+	}
+
+	async getCreateStatement(name: string, type: DbClientSchemaNodeType, opts?: SchemaOpts): Promise<string> {
+		assertSafeIdentifier(name);
+		const fqt = qualified(Q, [this.targetDb(opts), name]);
+		const keyword = type === 'view' ? 'VIEW' : 'TABLE';
+		const rows = (await this.requireSql().unsafe(`SHOW CREATE ${keyword} ${fqt}`)) as Array<Record<string, unknown>>;
+		const row = rows[0] ?? {};
+		const ddl = row['Create Table'] ?? row['Create View'] ?? Object.values(row)[1];
+		return String(ddl ?? '');
 	}
 
 	async createTable(definition: TableDefinition, opts?: SchemaOpts): Promise<string> {

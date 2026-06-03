@@ -10,6 +10,7 @@ import {
 import { invalidateUserSessions } from '$backend/auth/session-invalidation';
 import { auditLogQueries } from '$backend/database/queries';
 import { ws } from '$backend/utils/ws';
+import { clientIpFromConnection } from '$backend/utils/client-ip';
 
 export const usersHandler = createRouter()
 	// List all users (admin only — enforced by auth gate)
@@ -69,7 +70,7 @@ export const usersHandler = createRouter()
 				actorUserId,
 				eventType: 'project:assigned',
 				eventDetails: `Project ${data.projectId} assigned to user ${data.userId}`,
-				ipAddress: ws.getRemoteAddress(conn)
+				ipAddress: clientIpFromConnection(conn)
 			});
 			ws.emit.global('auth:user-projects-changed', {
 				type: 'assigned',
@@ -99,7 +100,7 @@ export const usersHandler = createRouter()
 				actorUserId,
 				eventType: 'project:unassigned',
 				eventDetails: `Project ${data.projectId} unassigned from user ${data.userId}`,
-				ipAddress: ws.getRemoteAddress(conn)
+				ipAddress: clientIpFromConnection(conn)
 			});
 			ws.emit.global('auth:user-projects-changed', {
 				type: 'unassigned',

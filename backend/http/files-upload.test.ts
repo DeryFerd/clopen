@@ -1,9 +1,9 @@
 /**
  * Integration tests for file upload race condition fix.
- * 
- * These tests verify that the atomic O_EXCL create prevents race conditions
- * when multiple uploads target the same file name by calling the actual
- * filesUploadRoute handler with mock HTTP requests.
+ *
+ * These tests verify that the atomic hard-link approach prevents race
+ * conditions when multiple uploads target the same file name by calling
+ * the actual filesUploadRoute handler with mock HTTP requests.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
@@ -112,7 +112,7 @@ beforeEach(async () => {
 });
 
 describe('File upload integration tests', () => {
-	it('concurrent uploads of same file - only one succeeds', async () => {
+	it('concurrent uploads of same file - link-based exclusive create prevents overwrite', async () => {
 		const file1 = new File(['content from upload 1'], 'test.txt', { type: 'text/plain' });
 		const file2 = new File(['content from upload 2'], 'test.txt', { type: 'text/plain' });
 
@@ -137,7 +137,7 @@ describe('File upload integration tests', () => {
 		expect(content.length).toBeGreaterThan(0); // Not empty placeholder
 	});
 
-	it('atomic exclusive create prevents race', async () => {
+	it('atomic link-based create prevents race', async () => {
 		const file = new File(['test content'], 'atomic.txt', { type: 'text/plain' });
 
 		// First upload succeeds
@@ -156,7 +156,7 @@ describe('File upload integration tests', () => {
 		expect(content).toBe('test content');
 	});
 
-	it('winner content is fully written (not empty placeholder)', async () => {
+	it('file appears atomically with full content (no partial-file window)', async () => {
 		const largeContent = 'x'.repeat(10000); // 10KB
 		const file = new File([largeContent], 'large.txt', { type: 'text/plain' });
 

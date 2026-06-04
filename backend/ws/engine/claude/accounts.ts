@@ -131,7 +131,7 @@ export const accountsHandler = createRouter()
 	}, async () => {
 		const provider = engineQueries.getProviderBySlug('claude-code', 'anthropic');
 		if (!provider) return { accounts: [] };
-		const accounts = engineQueries.getAccountsByProvider(provider.id);
+		const accounts = await engineQueries.getAccountsByProvider(provider.id);
 		return {
 			accounts: accounts.map(a => ({
 				id: a.id,
@@ -155,7 +155,7 @@ export const accountsHandler = createRouter()
 		data: t.Object({ id: t.Number() }),
 		response: t.Object({ success: t.Boolean() })
 	}, async ({ data }) => {
-		const active = engineQueries.getActiveAccountForEngine('claude-code');
+		const active = await engineQueries.getActiveAccountForEngine('claude-code');
 		engineQueries.deleteAccount(data.id);
 		if (active?.id === data.id) resetEnvironment();
 		return { success: true };
@@ -232,7 +232,7 @@ export const accountsHandler = createRouter()
 		userSetups.set(userId, setupId);
 
 		// ── Single onData listener — handles ALL phases ──
-		pty.onData((data: string) => {
+		pty.onData(async (data: string) => {
 			if (entry.disposed || entry.phase === 'done') return;
 			entry.buffer += data;
 
@@ -271,7 +271,7 @@ export const accountsHandler = createRouter()
 						cleanupSetup(setupId);
 						return;
 					}
-					const account = engineQueries.createAccount(provider.id, entry.accountName, token);
+					const account = await engineQueries.createAccount(provider.id, entry.accountName, token);
 					resetEnvironment();
 
 					ws.emit.user(userId, 'engine:claude-account-setup-complete', {
@@ -300,7 +300,7 @@ export const accountsHandler = createRouter()
 		});
 
 		// ── Single onExit listener — handles ALL phases ──
-		pty.onExit(() => {
+		pty.onExit(async () => {
 			if (entry.disposed || entry.phase === 'done') return;
 			debug.log('engine', `[${setupId}] PTY exited during phase: ${entry.phase}`);
 
@@ -325,7 +325,7 @@ export const accountsHandler = createRouter()
 						cleanupSetup(setupId);
 						return;
 					}
-					const account = engineQueries.createAccount(provider.id, entry.accountName, token);
+					const account = await engineQueries.createAccount(provider.id, entry.accountName, token);
 					resetEnvironment();
 					ws.emit.user(userId, 'engine:claude-account-setup-complete', {
 						setupId,

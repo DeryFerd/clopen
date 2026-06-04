@@ -106,7 +106,7 @@ export class QwenEngine implements AIEngine {
 	 * failure).
 	 */
 	async getAvailableModels(): Promise<EngineModel[]> {
-		const env = getEngineEnv();
+		const env = await getEngineEnv();
 		if (!env) {
 			throw new Error('Qwen Code is not configured. Add an API key in Settings → Engines → Qwen Code.');
 		}
@@ -129,7 +129,7 @@ export class QwenEngine implements AIEngine {
 
 		debug.log('chat', 'Qwen Code - Stream Query', { modelId, resume });
 
-		const resolution = getEngineEnv(accountId);
+		const resolution = await getEngineEnv(accountId);
 		if (!resolution) {
 			throw new Error('Qwen Code is not configured. Add an API key in Settings → Engines → Qwen Code.');
 		}
@@ -364,7 +364,7 @@ export class QwenEngine implements AIEngine {
 			accountId,
 		} = options;
 
-		const resolution = getEngineEnv(accountId);
+		const resolution = await getEngineEnv(accountId);
 		if (!resolution) {
 			throw new Error('Qwen Code is not configured. Add an API key in Settings → Engines → Qwen Code.');
 		}

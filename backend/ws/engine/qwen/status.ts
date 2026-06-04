@@ -41,8 +41,8 @@ export const qwenStatusHandler = createRouter()
 		debug.log('engine', 'Checking Qwen Code status...');
 
 		const provider = engineQueries.getProviderBySlug('qwen', 'qwen');
-		const accounts = provider ? engineQueries.getAccountsByProvider(provider.id) : [];
-		const activeAccount = engineQueries.getActiveAccountForEngine('qwen');
+		const accounts = provider ? await engineQueries.getAccountsByProvider(provider.id) : [];
+		const activeAccount = await engineQueries.getActiveAccountForEngine('qwen');
 
 		return {
 			installed: true,

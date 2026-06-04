@@ -61,8 +61,8 @@ export const codexStatusHandler = createRouter()
 		debug.log('engine', 'Checking Codex status...');
 
 		const provider = engineQueries.getProviderBySlug('codex', 'openai');
-		const accounts = provider ? engineQueries.getAccountsByProvider(provider.id) : [];
-		const activeAccount = engineQueries.getActiveAccountForEngine('codex');
+		const accounts = provider ? await engineQueries.getAccountsByProvider(provider.id) : [];
+		const activeAccount = await engineQueries.getActiveAccountForEngine('codex');
 
 		const cliVersion = await readCliVersion();
 

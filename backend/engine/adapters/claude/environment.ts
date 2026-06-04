@@ -59,26 +59,23 @@ export async function setupEnvironmentOnce(): Promise<void> {
  * When accountId is provided, overrides the OAuth token with that
  * specific account's token instead of the globally active account.
  */
-export function getEngineEnv(accountId?: number): Record<string, string> {
-  // Start from clean env (no Bun/npm/Vite pollution)
-  const env = getCleanSpawnEnv();
-  // Apply our overrides
-  Object.assign(env, _envOverrides);
+export async function getEngineEnv(accountId?: number): Promise<Record<string, string>> {
+	const env = getCleanSpawnEnv();
+	Object.assign(env, _envOverrides);
 
-  // Override with specific account token if requested
-  if (accountId !== undefined) {
-    try {
-      const account = engineQueries.getAccount(accountId);
-      if (account) {
-        env['CLAUDE_CODE_OAUTH_TOKEN'] = account.credential;
-        debug.log('engine', `Claude Code: Per-session account override → "${account.name}"`);
-      }
-    } catch {
-      // Ignore — fall back to default token from overrides
-    }
-  }
+	if (accountId !== undefined) {
+		try {
+			const account = await engineQueries.getAccount(accountId);
+			if (account) {
+				env['CLAUDE_CODE_OAUTH_TOKEN'] = account.credential;
+				debug.log('engine', `Claude Code: Per-session account override → "${account.name}"`);
+			}
+		} catch {
+			// Ignore DB errors during per-session override.
+		}
+	}
 
-  return env;
+	return env;
 }
 
 async function _doSetup(): Promise<void> {
@@ -94,7 +91,7 @@ async function _doSetup(): Promise<void> {
 
   // Inject OAuth token from active account (if any)
   try {
-    const activeAccount = engineQueries.getActiveAccountForEngine('claude-code');
+    const activeAccount = await engineQueries.getActiveAccountForEngine('claude-code');
     if (activeAccount) {
       overrides['CLAUDE_CODE_OAUTH_TOKEN'] = activeAccount.credential;
       debug.log('engine', `✅ Claude Code: Using account "${activeAccount.name}"`);

@@ -51,7 +51,7 @@ export const qwenAccountsHandler = createRouter()
 	}, async () => {
 		const provider = engineQueries.getProviderBySlug('qwen', 'qwen');
 		if (!provider) return { accounts: [] };
-		const accounts = engineQueries.getAccountsByProvider(provider.id);
+		const accounts = await engineQueries.getAccountsByProvider(provider.id);
 		return {
 			accounts: accounts.map(a => {
 				const credential = parseQwenCredential(a.credential);
@@ -92,7 +92,7 @@ export const qwenAccountsHandler = createRouter()
 			preset: data.preset,
 		});
 
-		const account = engineQueries.createAccount(provider.id, data.name.trim(), credential);
+		const account = await engineQueries.createAccount(provider.id, data.name.trim(), credential);
 
 		if (account.is_active === 1) {
 			await disposeQwenEngines();
@@ -122,7 +122,7 @@ export const qwenAccountsHandler = createRouter()
 		data: t.Object({ id: t.Number() }),
 		response: t.Object({ success: t.Boolean() })
 	}, async ({ data }) => {
-		const active = engineQueries.getActiveAccountForEngine('qwen');
+		const active = await engineQueries.getActiveAccountForEngine('qwen');
 		engineQueries.deleteAccount(data.id);
 		if (active?.id === data.id) await disposeQwenEngines();
 		return { success: true };

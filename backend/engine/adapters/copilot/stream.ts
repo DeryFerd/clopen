@@ -113,9 +113,9 @@ export class CopilotEngine implements AIEngine {
 			return;
 		}
 
-		const account = accountId != null
+		const account = await (accountId != null
 			? engineQueries.getAccount(accountId)
-			: engineQueries.getActiveAccountForEngine('copilot');
+			: engineQueries.getActiveAccountForEngine('copilot'));
 		if (!account) {
 			throw new Error('Copilot is not configured. Add a Personal Access Token in Settings → Engines → Copilot.');
 		}

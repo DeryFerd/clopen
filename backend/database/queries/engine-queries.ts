@@ -15,6 +15,7 @@
 
 import type { EngineType } from '$shared/types/unified';
 import { getDatabase } from '../index';
+import { encryptCredential, decryptCredential, isEncrypted } from '../../auth/credential-crypto';
 
 // ============================================================================
 // Types
@@ -44,6 +45,16 @@ export interface EngineAccount {
 /** Provider with its accounts joined. */
 export interface EngineProviderWithAccounts extends EngineProvider {
 	accounts: EngineAccount[];
+}
+
+async function decryptAccount(account: EngineAccount | null): Promise<EngineAccount | null> {
+	if (!account) return null;
+	if (!isEncrypted(account.credential)) return account;
+	return { ...account, credential: await decryptCredential(account.credential) };
+}
+
+async function decryptAccounts(accounts: EngineAccount[]): Promise<EngineAccount[]> {
+	return Promise.all(accounts.map(a => decryptAccount(a).then(a => a!)));
 }
 
 // ============================================================================
@@ -135,32 +146,35 @@ export const engineQueries = {
 	// Accounts
 	// ------------------------------------------------------------------
 
-	getAccount(id: number): EngineAccount | null {
+	async getAccount(id: number): Promise<EngineAccount | null> {
 		const db = getDatabase();
-		return db.prepare(`SELECT * FROM engine_accounts WHERE id = ?`).get(id) as EngineAccount | null;
+		const account = db.prepare(`SELECT * FROM engine_accounts WHERE id = ?`).get(id) as EngineAccount | null;
+		return decryptAccount(account);
 	},
 
-	getAccountsByProvider(providerId: number): EngineAccount[] {
+	async getAccountsByProvider(providerId: number): Promise<EngineAccount[]> {
 		const db = getDatabase();
-		return db.prepare(
+		const accounts = db.prepare(
 			`SELECT * FROM engine_accounts WHERE provider_id = ? ORDER BY created_at ASC`
 		).all(providerId) as EngineAccount[];
+		return decryptAccounts(accounts);
 	},
 
-	getActiveAccount(providerId: number): EngineAccount | null {
+	async getActiveAccount(providerId: number): Promise<EngineAccount | null> {
 		const db = getDatabase();
-		return db.prepare(
+		const account = db.prepare(
 			`SELECT * FROM engine_accounts WHERE provider_id = ? AND is_active = 1`
 		).get(providerId) as EngineAccount | null;
+		return decryptAccount(account);
 	},
 
 	/**
 	 * Get the active account for the first enabled provider of the given engine.
 	 * For claude-code this is effectively the active Anthropic account.
 	 */
-	getActiveAccountForEngine(engineType: EngineType): EngineAccount | null {
+	async getActiveAccountForEngine(engineType: EngineType): Promise<EngineAccount | null> {
 		const db = getDatabase();
-		return db.prepare(`
+		const account = db.prepare(`
 			SELECT a.*
 			FROM engine_accounts a
 			JOIN engine_providers p ON p.id = a.provider_id
@@ -168,10 +182,12 @@ export const engineQueries = {
 			ORDER BY p.created_at ASC, a.created_at ASC
 			LIMIT 1
 		`).get(engineType) as EngineAccount | null;
+		return decryptAccount(account);
 	},
 
-	createAccount(providerId: number, name: string, credential: string): EngineAccount {
+	async createAccount(providerId: number, name: string, credential: string): Promise<EngineAccount> {
 		const db = getDatabase();
+		const encrypted = await encryptCredential(credential);
 
 		// If it's the first account for this provider → mark active.
 		const count = (db.prepare(
@@ -182,10 +198,11 @@ export const engineQueries = {
 		const result = db.prepare(`
 			INSERT INTO engine_accounts (provider_id, name, credential, is_active)
 			VALUES (?, ?, ?, ?)
-		`).run(providerId, name, credential, isActive) as { lastInsertRowid: number | bigint };
+		`).run(providerId, name, encrypted, isActive) as { lastInsertRowid: number | bigint };
 
 		const id = Number(result.lastInsertRowid);
-		return db.prepare(`SELECT * FROM engine_accounts WHERE id = ?`).get(id) as EngineAccount;
+		const account = db.prepare(`SELECT * FROM engine_accounts WHERE id = ?`).get(id) as EngineAccount;
+		return { ...account, credential };
 	},
 
 	switchAccount(accountId: number): void {
@@ -227,20 +244,24 @@ export const engineQueries = {
 	 * into `credential` after each stream so refreshed tokens survive across
 	 * account switches.
 	 */
-	updateAccountCredential(accountId: number, credential: string): void {
+	async updateAccountCredential(accountId: number, credential: string): Promise<void> {
 		const db = getDatabase();
-		db.prepare(`UPDATE engine_accounts SET credential = ? WHERE id = ?`).run(credential, accountId);
+		const encrypted = await encryptCredential(credential);
+		db.prepare(`UPDATE engine_accounts SET credential = ? WHERE id = ?`).run(encrypted, accountId);
 	},
 
 	// ------------------------------------------------------------------
 	// Composite
 	// ------------------------------------------------------------------
 
-	getProvidersWithAccounts(engineType?: EngineType): EngineProviderWithAccounts[] {
+	async getProvidersWithAccounts(engineType?: EngineType): Promise<EngineProviderWithAccounts[]> {
 		const providers = this.getProviders(engineType);
-		return providers.map(p => ({
+		const accountsByProvider = await Promise.all(
+			providers.map(p => this.getAccountsByProvider(p.id))
+		);
+		return providers.map((p, i) => ({
 			...p,
-			accounts: this.getAccountsByProvider(p.id),
+			accounts: accountsByProvider[i],
 		}));
 	},
 };

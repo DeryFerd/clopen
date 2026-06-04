@@ -48,7 +48,7 @@ export const openCodeProviderHandler = createRouter()
 			providers: t.Array(ProviderSchema)
 		})
 	}, async () => {
-		const providers = engineQueries.getProvidersWithAccounts('opencode');
+		const providers = await engineQueries.getProvidersWithAccounts('opencode');
 		return {
 			providers: providers.map(p => ({
 				id: p.id,
@@ -100,7 +100,7 @@ export const openCodeProviderHandler = createRouter()
 		});
 
 		// Create first account (auto-active)
-		const account = engineQueries.createAccount(provider.id, data.accountName, data.credential);
+		const account = await engineQueries.createAccount(provider.id, data.accountName, data.credential);
 
 		debug.log('engine', `OpenCode provider added: ${data.slug} with account "${data.accountName}"`);
 
@@ -165,7 +165,7 @@ export const openCodeProviderHandler = createRouter()
 			account: AccountSchema
 		})
 	}, async ({ data }) => {
-		const account = engineQueries.createAccount(data.providerDbId, data.name, data.credential);
+		const account = await engineQueries.createAccount(data.providerDbId, data.name, data.credential);
 		debug.log('engine', `OpenCode account added: "${data.name}" for provider ${data.providerDbId}`);
 		return {
 			account: {

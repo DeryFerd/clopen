@@ -73,9 +73,9 @@ export class CodexEngine implements AIEngine {
 			return;
 		}
 
-		const account = accountId != null
+		const account = await (accountId != null
 			? engineQueries.getAccount(accountId)
-			: engineQueries.getActiveAccountForEngine('codex');
+			: engineQueries.getActiveAccountForEngine('codex'));
 		if (!account) {
 			throw new Error('Codex is not configured. Add an OpenAI API key or sign in with ChatGPT in Settings → Engines → Codex.');
 		}
@@ -148,9 +148,9 @@ export class CodexEngine implements AIEngine {
 
 		// Refresh auth.json for the active account every turn (cheap idempotent
 		// op — only writes when the file content drifts from the stored blob).
-		const activeAccount = accountId != null
+		const activeAccount = await (accountId != null
 			? engineQueries.getAccount(accountId)
-			: engineQueries.getActiveAccountForEngine('codex');
+			: engineQueries.getActiveAccountForEngine('codex'));
 		if (activeAccount) {
 			applyAccountAuth(activeAccount);
 		}
@@ -245,7 +245,7 @@ export class CodexEngine implements AIEngine {
 			// Snapshot the (possibly token-refreshed) auth.json back to DB so
 			// refreshes survive across account switches (README §9.13 step 4).
 			try {
-				snapshotAuthJsonToActiveAccount();
+				await snapshotAuthJsonToActiveAccount();
 			} catch (snapshotErr) {
 				debug.warn('engine', 'Codex: post-stream auth.json snapshot failed (non-fatal):', snapshotErr);
 			}

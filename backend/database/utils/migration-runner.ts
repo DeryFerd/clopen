@@ -4,8 +4,8 @@ import { debug } from '$shared/utils/logger';
 interface Migration {
 	id: string;
 	description: string;
-	up: (db: DatabaseConnection) => void;
-	down: (db: DatabaseConnection) => void;
+	up: (db: DatabaseConnection) => void | Promise<void>;
+	down: (db: DatabaseConnection) => void | Promise<void>;
 }
 
 export class MigrationRunner {
@@ -52,7 +52,7 @@ export class MigrationRunner {
 				
 				try {
 					// Execute migration
-					migration.up(this.db);
+					await migration.up(this.db);
 
 					// Record migration as executed
 					this.db.prepare(`
@@ -86,7 +86,7 @@ export class MigrationRunner {
 
 		try {
 			// Execute rollback
-			migration.down(this.db);
+			await migration.down(this.db);
 
 			// Remove migration record
 			this.db.prepare(`

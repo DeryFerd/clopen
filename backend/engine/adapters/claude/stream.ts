@@ -115,7 +115,7 @@ export class ClaudeCodeEngine implements AIEngine {
         permissionMode: 'bypassPermissions' as PermissionMode,
         allowDangerouslySkipPermissions: true,
         cwd: resolvedProjectPath,
-        env: getEngineEnv(accountId),
+        env: await getEngineEnv(accountId),
         systemPrompt: { type: "preset", preset: "claude_code" },
         settingSources: ["user", "project", "local"],
         forkSession: true,
@@ -304,7 +304,7 @@ export class ClaudeCodeEngine implements AIEngine {
       permissionMode: 'bypassPermissions' as PermissionMode,
       allowDangerouslySkipPermissions: true,
       cwd: resolvedPath,
-      env: getEngineEnv(accountId),
+      env: await getEngineEnv(accountId),
       systemPrompt: 'You are a structured data generator. Return JSON matching the provided schema.',
       tools: [],
       outputFormat: {

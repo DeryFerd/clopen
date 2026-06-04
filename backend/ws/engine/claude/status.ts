@@ -32,8 +32,8 @@ export const claudeCodeStatusHandler = createRouter()
 
 		const { installed, version } = await getStatus('claude');
 		const provider = engineQueries.getProviderBySlug('claude-code', 'anthropic');
-		const accounts = provider ? engineQueries.getAccountsByProvider(provider.id) : [];
-		const activeAccount = engineQueries.getActiveAccountForEngine('claude-code');
+		const accounts = provider ? await engineQueries.getAccountsByProvider(provider.id) : [];
+		const activeAccount = await engineQueries.getActiveAccountForEngine('claude-code');
 
 		return {
 			installed,

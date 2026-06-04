@@ -41,8 +41,8 @@ export const copilotStatusHandler = createRouter()
 		debug.log('engine', 'Checking Copilot status...');
 
 		const provider = engineQueries.getProviderBySlug('copilot', 'github');
-		const accounts = provider ? engineQueries.getAccountsByProvider(provider.id) : [];
-		const activeAccount = engineQueries.getActiveAccountForEngine('copilot');
+		const accounts = provider ? await engineQueries.getAccountsByProvider(provider.id) : [];
+		const activeAccount = await engineQueries.getActiveAccountForEngine('copilot');
 
 		return {
 			installed: true,

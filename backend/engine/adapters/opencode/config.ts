@@ -60,13 +60,13 @@ export function parseCredentialMap(credential: string): Record<string, string> |
  * plain, the value is bound to the catalog's first env name and the rest
  * fall back to the provider's shared `options` JSON.
  */
-export function generateOpenCodeProviderConfig(): OpenCodeProviderConfigResult {
+export async function generateOpenCodeProviderConfig(): Promise<OpenCodeProviderConfigResult> {
 	const providers = engineQueries.getEnabledProviders('opencode');
 	const enabledProviders: string[] = ['opencode'];
 	const envVars: Record<string, string> = {};
 
 	for (const provider of providers) {
-		const activeAccount = engineQueries.getActiveAccount(provider.id);
+		const activeAccount = await engineQueries.getActiveAccount(provider.id);
 		if (!activeAccount) continue;
 
 		enabledProviders.push(provider.slug);

@@ -37,7 +37,7 @@ export const copilotAccountsHandler = createRouter()
 	}, async () => {
 		const provider = engineQueries.getProviderBySlug('copilot', 'github');
 		if (!provider) return { accounts: [] };
-		const accounts = engineQueries.getAccountsByProvider(provider.id);
+		const accounts = await engineQueries.getAccountsByProvider(provider.id);
 		return {
 			accounts: accounts.map(a => ({
 				id: a.id,
@@ -67,7 +67,7 @@ export const copilotAccountsHandler = createRouter()
 			throw new Error('GitHub Copilot provider not found in database');
 		}
 
-		const account = engineQueries.createAccount(provider.id, data.name.trim(), data.token.trim());
+		const account = await engineQueries.createAccount(provider.id, data.name.trim(), data.token.trim());
 
 		// If this is the first account it became active — drop any stale engine instances.
 		if (account.is_active === 1) {
@@ -97,7 +97,7 @@ export const copilotAccountsHandler = createRouter()
 		data: t.Object({ id: t.Number() }),
 		response: t.Object({ success: t.Boolean() })
 	}, async ({ data }) => {
-		const active = engineQueries.getActiveAccountForEngine('copilot');
+		const active = await engineQueries.getActiveAccountForEngine('copilot');
 		engineQueries.deleteAccount(data.id);
 		if (active?.id === data.id) await disposeCopilotEngines();
 		return { success: true };

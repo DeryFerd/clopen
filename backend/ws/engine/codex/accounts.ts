@@ -156,7 +156,7 @@ function isLoginSuccess(buffer: string): boolean {
 	return /Successfully logged in/i.test(buffer);
 }
 
-function persistChatGptLoginResult(accountName: string): { ok: true; accountId: number } | { ok: false; error: string } {
+async function persistChatGptLoginResult(accountName: string): Promise<{ ok: true; accountId: number } | { ok: false; error: string }> {
 	const provider = engineQueries.getProviderBySlug('codex', 'openai');
 	if (!provider) return { ok: false, error: 'OpenAI Codex provider not found in DB' };
 
@@ -166,7 +166,7 @@ function persistChatGptLoginResult(accountName: string): { ok: true; accountId: 
 	}
 
 	const credential = serializeCodexCredential({ kind: 'chatgpt', authJson });
-	const account = engineQueries.createAccount(provider.id, accountName, credential);
+	const account = await engineQueries.createAccount(provider.id, accountName, credential);
 	return { ok: true, accountId: account.id };
 }
 
@@ -190,7 +190,7 @@ export const codexAccountsHandler = createRouter()
 	}, async () => {
 		const provider = engineQueries.getProviderBySlug('codex', 'openai');
 		if (!provider) return { accounts: [] };
-		const accounts = engineQueries.getAccountsByProvider(provider.id);
+		const accounts = await engineQueries.getAccountsByProvider(provider.id);
 		return {
 			accounts: accounts.map(a => ({
 				id: a.id,
@@ -224,7 +224,7 @@ export const codexAccountsHandler = createRouter()
 		}
 
 		const credential = serializeCodexCredential({ kind: 'api_key', apiKey: data.apiKey.trim() });
-		const account = engineQueries.createAccount(provider.id, data.name.trim(), credential);
+		const account = await engineQueries.createAccount(provider.id, data.name.trim(), credential);
 
 		if (account.is_active === 1) {
 			await disposeCodexEngines();
@@ -245,7 +245,7 @@ export const codexAccountsHandler = createRouter()
 		data: t.Object({ id: t.Number() }),
 		response: t.Object({ success: t.Boolean() })
 	}, async ({ data }) => {
-		const account = engineQueries.getAccount(data.id);
+		const account = await engineQueries.getAccount(data.id);
 		if (!account) throw new Error('Account not found');
 
 		engineQueries.switchAccount(data.id);
@@ -263,13 +263,13 @@ export const codexAccountsHandler = createRouter()
 		data: t.Object({ id: t.Number() }),
 		response: t.Object({ success: t.Boolean() })
 	}, async ({ data }) => {
-		const active = engineQueries.getActiveAccountForEngine('codex');
+		const active = await engineQueries.getActiveAccountForEngine('codex');
 		engineQueries.deleteAccount(data.id);
 
 		if (active?.id === data.id) {
 			// The new active account (auto-promoted by deleteAccount) needs its
 			// auth applied so the next stream uses the correct credential.
-			const newActive = engineQueries.getActiveAccountForEngine('codex');
+			const newActive = await engineQueries.getActiveAccountForEngine('codex');
 			if (newActive) applyAccountAuth(newActive);
 			await disposeCodexEngines();
 		}
@@ -366,7 +366,7 @@ export const codexAccountsHandler = createRouter()
 			userSetups.set(userId, setupId);
 
 			// ── Single onData listener — matches the Claude Code pattern ──
-			pty.onData((chunk: string) => {
+			pty.onData(async (chunk: string) => {
 				if (entry.disposed || entry.completed) return;
 				entry.buffer += chunk;
 
@@ -406,7 +406,7 @@ export const codexAccountsHandler = createRouter()
 				if (isLoginSuccess(clean) && !entry.completed) {
 					entry.completed = true;
 					debug.log('engine', `[${setupId}] Codex login success — persisting auth.json`);
-					const result = persistChatGptLoginResult(entry.accountName);
+					const result = await persistChatGptLoginResult(entry.accountName);
 					if (result.ok) {
 						disposeCodexEngines().finally(() => {
 							ws.emit.user(userId, 'engine:codex-account-setup-complete', {
@@ -425,7 +425,7 @@ export const codexAccountsHandler = createRouter()
 				}
 			});
 
-			pty.onExit(({ exitCode }) => {
+			pty.onExit(async ({ exitCode }) => {
 				if (entry.disposed || entry.cancelled) return;
 				if (entry.completed) return;
 
@@ -435,7 +435,7 @@ export const codexAccountsHandler = createRouter()
 				// in the final chunk right before exit.
 				if (isLoginSuccess(clean)) {
 					entry.completed = true;
-					const result = persistChatGptLoginResult(entry.accountName);
+					const result = await persistChatGptLoginResult(entry.accountName);
 					if (result.ok) {
 						disposeCodexEngines().finally(() => {
 							ws.emit.user(userId, 'engine:codex-account-setup-complete', {

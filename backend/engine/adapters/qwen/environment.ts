@@ -39,14 +39,14 @@ export interface QwenEnvResolution {
  * caller should surface a friendly error rather than spawning the CLI with
  * bad/empty credentials.
  */
-export function getEngineEnv(accountId?: number): QwenEnvResolution | null {
+export async function getEngineEnv(accountId?: number): Promise<QwenEnvResolution | null> {
 	const env = getCleanSpawnEnv();
 
 	let account: EngineAccount | null;
 	if (accountId !== undefined) {
-		account = engineQueries.getAccount(accountId);
+		account = await engineQueries.getAccount(accountId);
 	} else {
-		account = engineQueries.getActiveAccountForEngine('qwen');
+		account = await engineQueries.getActiveAccountForEngine('qwen');
 	}
 
 	if (!account) {

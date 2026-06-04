@@ -158,8 +158,8 @@ export function applyAccountAuth(account: EngineAccount): CodexCredential | null
  *   - The auth.json file doesn't exist.
  *   - The on-disk content is identical to what we already have stored.
  */
-export function snapshotAuthJsonToActiveAccount(): void {
-	const account = engineQueries.getActiveAccountForEngine('codex');
+export async function snapshotAuthJsonToActiveAccount(): Promise<void> {
+	const account = await engineQueries.getActiveAccountForEngine('codex');
 	if (!account) return;
 
 	const parsed = parseCodexCredential(account.credential);
@@ -171,7 +171,7 @@ export function snapshotAuthJsonToActiveAccount(): void {
 
 	const updated = serializeCodexCredential({ kind: 'chatgpt', authJson: current });
 	try {
-		engineQueries.updateAccountCredential(account.id, updated);
+		await engineQueries.updateAccountCredential(account.id, updated);
 		debug.log('engine', `Codex: persisted refreshed auth.json snapshot to account ${account.id}`);
 	} catch (error) {
 		debug.warn('engine', 'Codex: failed to persist auth.json snapshot:', error);

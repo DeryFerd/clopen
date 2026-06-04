@@ -147,7 +147,7 @@ async function init(): Promise<void> {
 	}
 
 	// Build provider config from DB (enabled providers + env vars)
-	const providerConfig = generateOpenCodeProviderConfig();
+	const providerConfig = await generateOpenCodeProviderConfig();
 	if (providerConfig.enabledProviders.length > 0) {
 		debug.log('engine', `Open Code server: enabling ${providerConfig.enabledProviders.length} provider(s): ${providerConfig.enabledProviders.join(', ')}`);
 	}

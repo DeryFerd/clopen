@@ -14,6 +14,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { z } from "zod";
 import { projectContextService } from '../project-context';
 import { validateMcpOutput } from '../output-validator';
+import { debug } from '$shared/utils/logger';
 
 /**
  * Infer argument types from Zod schema
@@ -158,6 +159,22 @@ export function buildServerRegistries<
 	};
 }
 
+const SENSITIVE_ARG_KEYS = new Set(['apiKey', 'api_key', 'token', 'secret', 'password', 'credential', 'key']);
+
+function sanitizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+	const result: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(args)) {
+		if (SENSITIVE_ARG_KEYS.has(key)) {
+			result[key] = '[REDACTED]';
+		} else if (typeof value === 'string' && value.length > 200) {
+			result[key] = value.slice(0, 200) + '...';
+		} else {
+			result[key] = value;
+		}
+	}
+	return result;
+}
+
 // ============================================================================
 // Remote MCP Server for Open Code (HTTP transport, in-process execution)
 // ============================================================================
@@ -209,7 +226,12 @@ export function createRemoteMcpServer(
 						isError: true,
 					} as any;
 				}
+				const start = performance.now();
+				debug.log('mcp-tool', `Invoke ${String(srv.meta.name)}/${String(toolName)}`, sanitizeArgs(args));
 				const result = await def.handler(args) as any;
+				const elapsed = (performance.now() - start).toFixed(1);
+				const isError = result?.isError === true;
+				debug.log('mcp-tool', `Result ${String(srv.meta.name)}/${String(toolName)} — ${isError ? 'error' : 'ok'} (${elapsed}ms)`);
 				if (result?.content) {
 					result.content = validateMcpOutput(result.content, toolName as string);
 				}

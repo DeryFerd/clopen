@@ -27,6 +27,7 @@ export type LogLabel =
 	// Communication
 	| 'websocket'
 	| 'mcp'
+	| 'mcp-tool'
 	| 'notification'
 	| 'rate-limit'
 	

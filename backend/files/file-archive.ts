@@ -228,8 +228,12 @@ async function extractWithinLimit(
 				failure = new Error(`Extracted content exceeds maximum allowed size of ${limitMB}MB`);
 				return;
 			}
-			chunks.push(chunk);
 			fileBytes += chunk.length;
+			if (fileBytes > limit) {
+				failure = new Error(`Entry "${file.name}" exceeds maximum allowed size of ${limitMB}MB`);
+				return;
+			}
+			chunks.push(chunk);
 			if (final) {
 				writes.push(writeEntry(fullPath, concatChunks(chunks, fileBytes)));
 				entryCount++;

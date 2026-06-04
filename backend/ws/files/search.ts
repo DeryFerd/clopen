@@ -6,6 +6,29 @@ import { readdir } from 'fs/promises';
 import { requireProjectPathAccess } from './path-access';
 import { validateFileSize } from '../../files/file-size-limit';
 
+const REDOS_PATTERN = /\(.*[+*].*\)[+*]|\[.*\]\s*[+*].*[+*]/;
+const REDOS_TIMEOUT_MS = 2000;
+
+function createSafeRegex(pattern: string, flags: string): RegExp | null {
+	if (REDOS_PATTERN.test(pattern)) {
+		debug.warn('file', 'ReDoS-risk pattern rejected:', pattern);
+		return null;
+	}
+
+	let regex: RegExp;
+	const start = Date.now();
+	try {
+		regex = new RegExp(pattern, flags);
+	} catch {
+		return null;
+	}
+	if (Date.now() - start > REDOS_TIMEOUT_MS / 2) {
+		return null;
+	}
+
+	return regex;
+}
+
 // Directories to skip during search
 const SKIP_DIRS = new Set([
 	'node_modules', '.git', '.svelte-kit', 'build', 'dist', 'coverage',
@@ -180,22 +203,22 @@ async function searchCodeContent(
 
 	const results: CodeSearchResult[] = [];
 
-	// Build the search regex
-	let searchPattern: RegExp;
-	try {
-		if (useRegex) {
-			let regexStr = query;
-			if (wholeWord) regexStr = `\\b${regexStr}\\b`;
-			searchPattern = new RegExp(regexStr, caseSensitive ? 'g' : 'gi');
-		} else {
-			let escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			if (wholeWord) escaped = `\\b${escaped}\\b`;
+	// Build the search regex with ReDoS protection
+	let searchPattern: RegExp | null;
+	if (useRegex) {
+		let regexStr = query;
+		if (wholeWord) regexStr = `\\b${regexStr}\\b`;
+		searchPattern = createSafeRegex(regexStr, caseSensitive ? 'g' : 'gi');
+	} else {
+		let escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		if (wholeWord) escaped = `\\b${escaped}\\b`;
+		try {
 			searchPattern = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+		} catch {
+			return [];
 		}
-	} catch (error) {
-		debug.error('file', 'Invalid search pattern:', error);
-		return [];
 	}
+	if (!searchPattern) return [];
 
 	// Parse include/exclude filters
 	const includes = parseFilterPattern(includePattern);
@@ -292,22 +315,23 @@ async function replaceInFiles(
 
 	const results: ReplaceResult[] = [];
 
-	// Build replace regex
-	let pattern: RegExp;
-	try {
-		const flags = caseSensitive ? 'g' : 'gi';
-		if (useRegex) {
-			let regexStr = searchQuery;
-			if (wholeWord) regexStr = `\\b${regexStr}\\b`;
-			pattern = new RegExp(regexStr, flags);
-		} else {
-			let escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			if (wholeWord) escaped = `\\b${escaped}\\b`;
+	// Build replace regex with ReDoS protection
+	let pattern: RegExp | null;
+	const flags = caseSensitive ? 'g' : 'gi';
+	if (useRegex) {
+		let regexStr = searchQuery;
+		if (wholeWord) regexStr = `\\b${regexStr}\\b`;
+		pattern = createSafeRegex(regexStr, flags);
+	} else {
+		let escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		if (wholeWord) escaped = `\\b${escaped}\\b`;
+		try {
 			pattern = new RegExp(escaped, flags);
+		} catch {
+			return [];
 		}
-	} catch {
-		return [];
 	}
+	if (!pattern) return [];
 
 	for (const searchResult of searchResults) {
 		const fullPath = join(projectPath, searchResult.relativePath);

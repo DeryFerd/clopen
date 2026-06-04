@@ -27,6 +27,9 @@ export interface ProcessedImage {
 	size: number;
 }
 
+/** Hard cap on animation frames — prevents resource exhaustion via GIF bomb. */
+const MAX_ANIMATION_FRAMES = 100;
+
 /** Clamp a value into [min, max], rounding to an integer. */
 function clampInt(value: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, Math.round(value)));
@@ -193,6 +196,13 @@ export async function processImageEdit(
 		throw new Error('Source file is not a readable image');
 	}
 
+	const frameCount = srcMeta.pages ?? 1;
+	if (frameCount > MAX_ANIMATION_FRAMES) {
+		throw new Error(
+			`Cannot process animated image: ${frameCount} frames exceeds the limit of ${MAX_ANIMATION_FRAMES}`
+		);
+	}
+
 	// Nothing to do: not compressing, no edits, and the format is unchanged →
 	// return the original bytes verbatim so an untouched file stays identical.
 	const compress = recipe.output.compress ?? false;
@@ -208,7 +218,7 @@ export async function processImageEdit(
 		};
 	}
 
-	const animated = (srcMeta.pages ?? 1) > 1;
+	const animated = frameCount > 1;
 	const rotate = recipe.rotate ?? 0;
 
 	let pipeline: Sharp;

@@ -24,6 +24,7 @@ import { authQueries, fileAuditLogQueries } from '../database/queries';
 import { findContainingProjectId, requireFilePathAccessFor } from '../ws/files/path-access';
 import { clientIpFromRequest } from '../utils/client-ip';
 import { validateFileSize } from '../files/file-size-limit';
+import { isBlockedExtension } from './file-type-validator';
 
 type AuthIdentity = { userId: string; role: string };
 
@@ -70,6 +71,10 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 	}
 	if (!Number.isFinite(fileSizeParam) || fileSizeParam < 0) {
 		return new Response('Invalid fileSize query parameter', { status: 400 });
+	}
+
+	if (isBlockedExtension(fileNameParam)) {
+		return new Response(`File type "${fileNameParam.slice(fileNameParam.lastIndexOf('.'))}" is not allowed for upload`, { status: 400 });
 	}
 
 	const ipAddress = clientIpFromRequest(request, server);

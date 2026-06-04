@@ -24,6 +24,7 @@ import { authQueries, fileAuditLogQueries } from '../database/queries';
 import { findContainingProjectId, requireFilePathAccessFor } from '../ws/files/path-access';
 import { clientIpFromRequest } from '../utils/client-ip';
 import { validateFileSize } from '../files/file-size-limit';
+import { uploadTempCleanup } from './upload-temp-cleanup';
 
 type AuthIdentity = { userId: string; role: string };
 
@@ -145,10 +146,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 	}
 
 	const tempPath = `${resolvedFinal}.${crypto.randomUUID()}.partial`;
+	uploadTempCleanup.register(tempPath);
 	const writer = Bun.file(tempPath).writer();
 	let written = 0;
 
 	const cleanupTemp = async () => {
+		uploadTempCleanup.deregister(tempPath);
 		try { await writer.end(); } catch { /* best-effort */ }
 		try { await unlink(tempPath); } catch { /* best-effort */ }
 	};
@@ -210,6 +213,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			return new Response('File already exists', { status: 409 });
 		}
 
+		uploadTempCleanup.deregister(tempPath);
 		await rename(tempPath, resolvedFinal);
 		const stats = await stat(resolvedFinal);
 

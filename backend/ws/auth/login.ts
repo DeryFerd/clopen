@@ -143,7 +143,8 @@ export const loginHandler = createRouter()
 		response: t.Object({
 			user: authUserSchema,
 			sessionToken: t.String(),
-			expiresAt: t.String()
+			expiresAt: t.String(),
+			rotated: t.Optional(t.Boolean())
 		})
 	}, async ({ data, conn }) => {
 		const ip = ws.getRemoteAddress(conn);
@@ -161,7 +162,11 @@ export const loginHandler = createRouter()
 		}
 
 		try {
+			const oldTokenHash = (await import('$backend/auth/tokens')).hashToken(data.token);
 			const result = loginWithToken(data.token);
+
+			// Check if token was rotated (hash changed)
+			const rotated = result.tokenHash !== oldTokenHash;
 
 			// Success — clear any rate limit record for this IP
 			if (isRateLimited) {
@@ -172,7 +177,7 @@ export const loginHandler = createRouter()
 				userId: result.user.id,
 				actorUserId: result.user.id,
 				eventType: 'auth:login',
-				eventDetails: `User ${result.user.name} logged in via ${tokenType} token`,
+				eventDetails: `User ${result.user.name} logged in via ${tokenType} token${rotated ? ' (session rotated)' : ''}`,
 				ipAddress: clientIpFromConnection(conn)
 			});
 
@@ -181,7 +186,8 @@ export const loginHandler = createRouter()
 			return {
 				user: result.user,
 				sessionToken: result.sessionToken,
-				expiresAt: result.expiresAt
+				expiresAt: result.expiresAt,
+				rotated: rotated || undefined
 			};
 		} catch (err) {
 			// Record failure for rate limiting (only non-session tokens)

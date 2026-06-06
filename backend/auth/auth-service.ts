@@ -9,6 +9,7 @@ import type { Project } from '$shared/types/database/schema';
 import { generateSessionToken, generatePAT, generateInviteToken, hashToken, getTokenType } from './tokens';
 import { generateColorFromString, getInitials } from '$backend/utils/user-helpers';
 import { debug } from '$shared/utils/logger';
+import { checkAndRotateSession, type RotationResult } from './session-rotation';
 
 /** Default session lifetime in days */
 const DEFAULT_SESSION_DAYS = 30;
@@ -287,15 +288,28 @@ export function loginWithToken(token: string): AuthResult & { tokenHash: string 
 			throw new Error('Session expired');
 		}
 
-		// Update last active
-		authQueries.updateLastActive(session.id);
-
 		const user = authQueries.getUserById(session.user_id);
 		if (!user) {
 			authQueries.deleteSession(session.id);
 			throw new Error('User not found');
 		}
 
+		// Check if session should be rotated
+		const rotation = checkAndRotateSession(session);
+		
+		if (rotation.rotated) {
+			// Session was rotated — return new token
+			debug.log('auth', `Session login with rotation: ${user.name} (${user.id})`);
+			return {
+				user: toAuthUser(user),
+				sessionToken: rotation.newToken!,
+				expiresAt: rotation.newExpiresAt!,
+				tokenHash: rotation.newTokenHash!
+			};
+		}
+
+		// No rotation — update last active and return existing token
+		authQueries.updateLastActive(session.id);
 		debug.log('auth', `Session login: ${user.name} (${user.id})`);
 
 		return {

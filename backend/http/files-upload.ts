@@ -16,7 +16,7 @@
 
 import { Elysia } from 'elysia';
 import { join } from 'node:path';
-import { link, mkdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, stat, unlink } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
@@ -145,27 +145,34 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response('Request body is empty', { status: 400 });
 	}
 
-	// Stream to temp file, then atomically link into place.
+	// Stream to a unique temp file, then atomically link into place.
 	// link() uses O_EXCL semantics — fails with EEXIST if final already exists.
 	// The final path only appears with full content (no partial-file visibility).
-	const tempPath = `${resolvedFinal}.uploading.${Date.now()}`;
+	const tempPath = `${resolvedFinal}.${crypto.randomUUID()}.partial`;
+	const writer = Bun.file(tempPath).writer();
 	let written = 0;
+
+	const cleanupTemp = async () => {
+		try { await writer.end(); } catch { /* best-effort */ }
+		try { await unlink(tempPath); } catch { /* best-effort */ }
+	};
 
 	try {
 		const reader = request.body.getReader();
-		const chunks: Uint8Array[] = [];
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
 			if (!value) continue;
 			const incoming = value.byteLength;
 			if (written + incoming > fileSizeParam) {
-				await unlink(tempPath).catch(() => {});
+				await cleanupTemp();
 				return new Response('Received more bytes than declared file size', { status: 400 });
 			}
-			chunks.push(value);
+			writer.write(value);
 			written += incoming;
 		}
+
+		await writer.end();
 
 		if (written !== fileSizeParam) {
 			await unlink(tempPath).catch(() => {});
@@ -189,14 +196,6 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			});
 			return new Response(error instanceof Error ? error.message : 'File too large', { status: 413 });
 		}
-
-		const combined = new Uint8Array(written);
-		let offset = 0;
-		for (const chunk of chunks) {
-			combined.set(chunk, offset);
-			offset += chunk.byteLength;
-		}
-		await writeFile(tempPath, combined);
 
 		// Atomic exclusive link — fails with EEXIST if final already exists
 		try {

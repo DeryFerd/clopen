@@ -6,23 +6,48 @@ import { readdir } from 'fs/promises';
 import { requireProjectPathAccess } from './path-access';
 import { validateFileSize } from '../../files/file-size-limit';
 
-const REDOS_PATTERN = /\(.*[+*].*\)[+*]|\[.*\]\s*[+*].*[+*]/;
-const REDOS_TIMEOUT_MS = 2000;
+// Heuristic patterns that indicate potential ReDoS risk:
+// 1. Nested quantifiers: (a+)+, (.*)+, (a*)*,  (x{1,5})+
+// 2. Alternation (with OR without quantifiers inside) under quantifier: (a|aa)+, (foo|foobar)+, (.*)+
+// 3. Character classes with adjacent quantifiers: [a-z]*[a-z]+
+const REDOS_PATTERNS = [
+	/\(.*[+*?{].*\)[+*?{]/,          // nested quantifiers like (a+)+, (.*)+, or (x{1,5})+
+	/\([^)]*\|[^)]*\)[+*?{]/,        // ANY alternation under quantifier: (a|aa)+, (foo|bar)+
+	/\[[^\]]+\]\s*[+*?]\s*\[[^\]]+\]\s*[+*?]/,  // adjacent char-class quantifiers
+];
+
+// Maximum execution time for regex test (milliseconds)
+const REGEX_TIMEOUT_MS = 100;
 
 function createSafeRegex(pattern: string, flags: string): RegExp | null {
-	if (REDOS_PATTERN.test(pattern)) {
-		debug.warn('file', 'ReDoS-risk pattern rejected:', pattern);
-		return null;
+	// Check against ReDoS heuristics
+	for (const heuristic of REDOS_PATTERNS) {
+		if (heuristic.test(pattern)) {
+			debug.warn('file', 'ReDoS-risk pattern rejected:', pattern);
+			return null;
+		}
 	}
 
 	let regex: RegExp;
-	const start = Date.now();
 	try {
 		regex = new RegExp(pattern, flags);
-	} catch {
+	} catch (error) {
+		debug.warn('file', 'Invalid regex pattern:', pattern);
 		return null;
 	}
-	if (Date.now() - start > REDOS_TIMEOUT_MS / 2) {
+
+	// Test execution time with a worst-case string to detect catastrophic backtracking
+	const testString = 'a'.repeat(50); // 50-char string of 'a'
+	const startTime = Date.now();
+	try {
+		regex.test(testString);
+		const elapsed = Date.now() - startTime;
+		if (elapsed > REGEX_TIMEOUT_MS) {
+			debug.warn('file', `ReDoS-risk pattern rejected (execution timeout: ${elapsed}ms):`, pattern);
+			return null;
+		}
+	} catch (error) {
+		debug.warn('file', 'Regex execution error:', pattern, error);
 		return null;
 	}
 
@@ -214,7 +239,8 @@ async function searchCodeContent(
 		if (wholeWord) escaped = `\\b${escaped}\\b`;
 		try {
 			searchPattern = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
-		} catch {
+		} catch (error) {
+			debug.error('file', 'Invalid escaped search pattern:', error);
 			return [];
 		}
 	}
@@ -327,7 +353,8 @@ async function replaceInFiles(
 		if (wholeWord) escaped = `\\b${escaped}\\b`;
 		try {
 			pattern = new RegExp(escaped, flags);
-		} catch {
+		} catch (error) {
+			debug.error('file', 'Invalid escaped replace pattern:', error);
 			return [];
 		}
 	}

@@ -24,6 +24,7 @@ import { authQueries, fileAuditLogQueries } from '../database/queries';
 import { findContainingProjectId, requireFilePathAccessFor } from '../ws/files/path-access';
 import { clientIpFromRequest } from '../utils/client-ip';
 import { validateFileSize } from '../files/file-size-limit';
+import { uploadTempCleanup } from './upload-temp-cleanup';
 
 type AuthIdentity = { userId: string; role: string };
 
@@ -149,10 +150,12 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 	// link() uses O_EXCL semantics — fails with EEXIST if final already exists.
 	// The final path only appears with full content (no partial-file visibility).
 	const tempPath = `${resolvedFinal}.${crypto.randomUUID()}.partial`;
+	uploadTempCleanup.register(tempPath);
 	const writer = Bun.file(tempPath).writer();
 	let written = 0;
 
 	const cleanupTemp = async () => {
+		uploadTempCleanup.deregister(tempPath);
 		try { await writer.end(); } catch { /* best-effort */ }
 		try { await unlink(tempPath); } catch { /* best-effort */ }
 	};
@@ -175,6 +178,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		await writer.end();
 
 		if (written !== fileSizeParam) {
+			uploadTempCleanup.deregister(tempPath);
 			await unlink(tempPath).catch(() => {});
 			return new Response(`Incomplete upload: received ${written} of ${fileSizeParam} bytes`, { status: 400 });
 		}
@@ -182,6 +186,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		try {
 			validateFileSize(written);
 		} catch (error) {
+			uploadTempCleanup.deregister(tempPath);
 			await unlink(tempPath).catch(() => {});
 			fileAuditLogQueries.logOperation({
 				userId: identity.userId,
@@ -202,6 +207,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			await link(tempPath, resolvedFinal);
 		} catch (error: unknown) {
 			if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+				uploadTempCleanup.deregister(tempPath);
 				await unlink(tempPath).catch(() => {});
 				return new Response('File already exists', { status: 409 });
 			}
@@ -220,6 +226,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			throw error;
 		}
 
+		uploadTempCleanup.deregister(tempPath);
 		// Clean up temp — the real file is now the hard-link
 		await unlink(tempPath).catch(() => {});
 
@@ -242,6 +249,7 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			modified: stats.mtime.toISOString()
 		});
 	} catch (error) {
+		uploadTempCleanup.deregister(tempPath);
 		await unlink(tempPath).catch(() => {});
 		debug.error('file', 'HTTP upload error:', error);
 		const message = error instanceof Error ? error.message : 'Upload failed';

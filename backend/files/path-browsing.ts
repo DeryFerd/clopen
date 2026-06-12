@@ -1,5 +1,5 @@
 import { join, extname } from 'path';
-import { readdir as fsReaddir } from 'fs/promises';
+import { readdir as fsReaddir } from 'node:fs/promises';
 import { existsSync } from 'fs';
 
 import { debug } from '$shared/utils/logger';

@@ -1,11 +1,8 @@
 import { dirname, extname, join } from 'path';
-import { readdir as fsReaddir, rename as fsRename, stat as fsStat, unlink as fsUnlink, rm as fsRm } from 'node:fs/promises';
+import { mkdir as fsMkdir, readdir as fsReaddir, rename as fsRename, stat as fsStat, unlink as fsUnlink, rm as fsRm } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { validateFileSize } from './file-size-limit';
-
-// Import Bun native functions and create wrappers for better API compatibility
-const { spawn } = Bun;
 
 // Cross-platform readdir using fs.promises
 async function readdir(path: string): Promise<string[]> {
@@ -14,7 +11,6 @@ async function readdir(path: string): Promise<string[]> {
 }
 
 async function mkdir(path: string, options?: { recursive?: boolean }) {
-	const { mkdir: fsMkdir } = await import('node:fs/promises');
 	try {
 		await fsMkdir(path, { recursive: options?.recursive ?? false });
 	} catch (error) {

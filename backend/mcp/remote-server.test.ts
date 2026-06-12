@@ -1,80 +1,92 @@
 /**
- * Tests for MCP Remote Server Authentication
+ * Integration tests for MCP Remote Server authentication.
+ *
+ * These exercise the real `handleMcpRequest` against the real auth queries and
+ * a real test database — the same pattern as files-upload.test.ts. We avoid
+ * `mock.module` for shared modules (`$backend/database/queries`,
+ * `$backend/auth/tokens`) because Bun applies module mocks process-globally,
+ * and a partial `authQueries` stub would leak into other integration tests.
  */
 
-import { describe, expect, test, beforeAll, mock } from 'bun:test';
+import { describe, expect, test, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 
-// Mock dependencies
-const mockAuthQueries = {
-	getSessionByTokenHash: mock((hash: string) => {
-		if (hash === 'valid-session-hash') {
-			return {
-				id: 'session-1',
-				user_id: 'user-123',
-				expires_at: new Date(Date.now() + 86400000).toISOString()
-			};
-		}
-		return null;
-	}),
-	getUserById: mock((id: string) => {
-		if (id === 'user-123') {
-			return { id: 'user-123', role: 'admin', name: 'Test User' };
-		}
-		return null;
-	}),
-	getUserByPatHash: mock((hash: string) => {
-		if (hash === 'valid-pat-hash') {
-			return { id: 'user-456', role: 'member', name: 'PAT User' };
-		}
-		return null;
-	})
-};
+import { handleMcpRequest } from './remote-server';
+import { authQueries, settingsQueries } from '../database/queries';
+import { generatePAT, generateSessionToken, hashToken } from '../auth/tokens';
+import { initializeDatabase, closeDatabase, getDatabase } from '../database';
 
-const mockHashToken = mock((token: string) => {
-	if (token === 'valid-session-token') return 'valid-session-hash';
-	if (token === 'valid-pat-token') return 'valid-pat-hash';
-	return 'invalid-hash';
-});
+let testUserId: string;
+let sessionToken: string;
+let patToken: string;
 
-let mockAuthMode = 'required';
-const mockGetAuthMode = mock(() => mockAuthMode);
+function setAuthMode(mode: 'none' | 'required'): void {
+	settingsQueries.set('system:settings', JSON.stringify({ authMode: mode }));
+}
 
-// Mock modules
-mock.module('$backend/database/queries', () => ({
-	authQueries: mockAuthQueries
-}));
+function sessionCount(userId: string): number {
+	const row = getDatabase()
+		.prepare('SELECT COUNT(*) as count FROM auth_sessions WHERE user_id = ?')
+		.get(userId) as { count: number };
+	return row.count;
+}
 
-mock.module('$backend/auth/tokens', () => ({
-	hashToken: mockHashToken
-}));
+function mcpRequest(token?: string): Request {
+	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	if (token) headers['Authorization'] = `Bearer ${token}`;
+	return new Request('http://localhost/mcp', {
+		method: 'POST',
+		headers,
+		body: JSON.stringify({
+			jsonrpc: '2.0',
+			method: 'initialize',
+			params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+			id: 1
+		})
+	});
+}
 
-mock.module('$backend/auth/auth-service', () => ({
-	getAuthMode: mockGetAuthMode
-}));
+beforeAll(async () => {
+	await initializeDatabase();
 
-// Import after mocking
-const { handleMcpRequest } = await import('./remote-server');
-
-describe('MCP Remote Server Authentication', () => {
-	beforeAll(() => {
-		mockAuthMode = 'required';
+	// Test user authenticates with both a session token and a PAT.
+	patToken = generatePAT();
+	testUserId = `user-${randomUUID()}`;
+	authQueries.createUser({
+		id: testUserId,
+		name: 'MCP Test User',
+		color: '#000000',
+		avatar: 'mcp',
+		role: 'admin',
+		personal_access_token_hash: hashToken(patToken),
+		created_at: new Date().toISOString()
 	});
 
-	test('should reject requests without Authorization header', async () => {
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: {},
-				id: 1
-			})
-		});
+	sessionToken = generateSessionToken();
+	authQueries.createSession({
+		id: randomUUID(),
+		user_id: testUserId,
+		token_hash: hashToken(sessionToken),
+		expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+		created_at: new Date().toISOString(),
+		last_active_at: new Date().toISOString()
+	});
+});
 
-		const response = await handleMcpRequest(request);
+afterAll(() => {
+	authQueries.deleteSessionsByUserId(testUserId);
+	authQueries.deleteUser(testUserId);
+	settingsQueries.set('system:settings', JSON.stringify({ authMode: 'required' }));
+	closeDatabase();
+});
+
+describe('MCP Remote Server Authentication', () => {
+	beforeEach(() => {
+		setAuthMode('required');
+	});
+
+	test('rejects requests without an Authorization header', async () => {
+		const response = await handleMcpRequest(mcpRequest());
 		expect(response.status).toBe(401);
 
 		const body = await response.json();
@@ -83,158 +95,56 @@ describe('MCP Remote Server Authentication', () => {
 		expect(body.error.message).toContain('Unauthorized');
 	});
 
-	test('should reject requests with invalid Bearer token', async () => {
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': 'Bearer invalid-token-12345'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: {},
-				id: 1
-			})
-		});
-
-		const response = await handleMcpRequest(request);
+	test('rejects requests with an invalid Bearer token', async () => {
+		const response = await handleMcpRequest(mcpRequest('invalid-token-12345'));
 		expect(response.status).toBe(401);
 
 		const body = await response.json();
-		expect(body.error).toBeDefined();
 		expect(body.error.code).toBe(-32001);
 	});
 
-	test('should reject requests with malformed Authorization header', async () => {
+	test('rejects requests with a malformed Authorization header', async () => {
 		const request = new Request('http://localhost/mcp', {
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': 'InvalidFormat token123'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: {},
-				id: 1
-			})
+			headers: { 'Content-Type': 'application/json', 'Authorization': 'InvalidFormat token123' },
+			body: JSON.stringify({ jsonrpc: '2.0', method: 'initialize', params: {}, id: 1 })
 		});
-
 		const response = await handleMcpRequest(request);
 		expect(response.status).toBe(401);
 	});
 
-	test('should include WWW-Authenticate header in 401 responses', async () => {
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: {},
-				id: 1
-			})
-		});
-
-		const response = await handleMcpRequest(request);
+	test('includes a WWW-Authenticate header in 401 responses', async () => {
+		const response = await handleMcpRequest(mcpRequest());
 		expect(response.status).toBe(401);
 		expect(response.headers.get('WWW-Authenticate')).toBe('Bearer realm="MCP Server"');
 	});
 
-	test('should accept valid session token', async () => {
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': 'Bearer valid-session-token'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
-				id: 1
-			})
-		});
-
-		const response = await handleMcpRequest(request);
-		// Should not be 401 - will be handled by MCP transport
+	test('accepts a valid session token', async () => {
+		const response = await handleMcpRequest(mcpRequest(sessionToken));
+		// Past auth — the MCP transport handles the body from here.
 		expect(response.status).not.toBe(401);
 	});
 
-	test('should accept valid PAT token', async () => {
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': 'Bearer valid-pat-token'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
-				id: 1
-			})
-		});
-
-		const response = await handleMcpRequest(request);
-		// Should not be 401 - will be handled by MCP transport
+	test('accepts a valid PAT token', async () => {
+		const response = await handleMcpRequest(mcpRequest(patToken));
 		expect(response.status).not.toBe(401);
 	});
 
-	test('should skip authentication in no-auth mode', async () => {
-		mockAuthMode = 'none';
-
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-				// No Authorization header
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
-				id: 1
-			})
-		});
-
-		const response = await handleMcpRequest(request);
-		// Should not be 401 in no-auth mode
+	test('skips authentication in no-auth mode', async () => {
+		setAuthMode('none');
+		const response = await handleMcpRequest(mcpRequest());
 		expect(response.status).not.toBe(401);
-
-		// Reset
-		mockAuthMode = 'required';
 	});
 
-	test('should not create new session on each request', () => {
-		// Verify that getUserByPatHash and getSessionByTokenHash are used
-		// instead of loginWithToken which creates sessions
-		
-		// Reset mock call counts
-		mockAuthQueries.getSessionByTokenHash.mockClear();
-		mockAuthQueries.getUserByPatHash.mockClear();
+	test('validates via pure lookup without minting a session', async () => {
+		// Pins blocker #1: the validator must not behave like loginWithToken,
+		// which inserts a fresh session row on every call.
+		const before = sessionCount(testUserId);
 
-		const request = new Request('http://localhost/mcp', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': 'Bearer valid-session-token'
-			},
-			body: JSON.stringify({
-				jsonrpc: '2.0',
-				method: 'initialize',
-				params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
-				id: 1
-			})
-		});
+		await handleMcpRequest(mcpRequest(sessionToken));
+		await handleMcpRequest(mcpRequest(patToken));
+		await handleMcpRequest(mcpRequest(sessionToken));
 
-		handleMcpRequest(request);
-
-		// Should call getSessionByTokenHash (pure lookup)
-		expect(mockAuthQueries.getSessionByTokenHash).toHaveBeenCalled();
-		// Should NOT create any new sessions
+		expect(sessionCount(testUserId)).toBe(before);
 	});
 });

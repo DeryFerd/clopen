@@ -20,7 +20,7 @@ import { getClopenDir } from '$backend/utils/paths';
 import { resolveBinary, resolveBinaryWithRefresh } from '$backend/utils/cli';
 import { resolveStaticCurlAsset } from '$backend/utils/static-curl';
 
-export type ToolId = 'git' | 'claude' | 'opencode' | 'copilot' | 'codex' | 'qwen' | 'chrome' | 'cloudflared';
+export type ToolId = 'git' | 'claude' | 'opencode' | 'copilot' | 'codex' | 'qwen' | 'chrome';
 
 export interface ManualInstruction {
 	label: string;
@@ -108,8 +108,6 @@ function detectMacPkgMgr(): 'brew' | null {
  * Google Chrome via the distro package manager and skip this scan.
  */
 export function resolveClopenChromePath(): string | null {
-	if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
-
 	const cacheDir = join(getClopenDir(), 'bin', 'chrome');
 	if (!existsSync(cacheDir)) return null;
 
@@ -127,10 +125,16 @@ export function resolveClopenChromePath(): string | null {
 					);
 					if (existsSync(candidate)) return candidate;
 				}
-			} else {
+			} else if (process.platform === 'win32') {
 				const winDirs = ['chrome-win64', 'chrome-win'];
 				for (const dir of winDirs) {
 					const candidate = join(buildDir, dir, 'chrome.exe');
+					if (existsSync(candidate)) return candidate;
+				}
+			} else {
+				const linuxDirs = ['chrome-linux64', 'chrome-linux'];
+				for (const dir of linuxDirs) {
+					const candidate = join(buildDir, dir, 'chrome');
 					if (existsSync(candidate)) return candidate;
 				}
 			}
@@ -204,15 +208,6 @@ export async function getToolStatus(tool: ToolId): Promise<ToolStatus> {
 	if (!resolved) return { tool, installed: false, version: null, source: null };
 	const version = await runVersion(resolved);
 	if (!version) return { tool, installed: false, version: null, source: null };
-
-	// Cloudflared: tag binaries under ~/.clopen/bin as "clopen"-managed so the
-	// UI distinguishes System Tools installs from system-wide ones.
-	if (tool === 'cloudflared') {
-		const clopenBinDir = join(getClopenDir(), 'bin');
-		if (resolved.startsWith(clopenBinDir)) {
-			return { tool, installed: true, version, source: 'clopen' };
-		}
-	}
 
 	return { tool, installed: true, version, source: resolved };
 }
@@ -396,7 +391,15 @@ async function resolveOpenCodeRecipe(): Promise<Recipe> {
 	};
 
 	if (process.platform === 'win32') {
-		base.unavailableReason = 'OpenCode install script is not available on Windows via PowerShell. Use WSL or the manual instructions.';
+		base.autoInstallable = true;
+		base.shell = { program: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command'] };
+		base.command = ['irm https://opencode.ai/install.ps1 | iex'];
+		base.displayCommand = 'irm https://opencode.ai/install.ps1 | iex';
+		base.manualInstructions.push({
+			label: 'PowerShell',
+			command: 'irm https://opencode.ai/install.ps1 | iex',
+			docs: 'https://opencode.ai'
+		});
 		return base;
 	}
 
@@ -539,6 +542,9 @@ interface LinuxChromeStrategy {
 async function resolveLinuxChromeRecipe(): Promise<Recipe> {
 	const mgr = detectLinuxPkgMgr();
 	const arch = process.arch;
+	const cacheDir = join(getClopenDir(), 'bin');
+	const pptrArgs = ['bun', 'x', '@puppeteer/browsers', 'install', 'chrome@stable', '--path', cacheDir];
+	const pptrDisplay = `bun x @puppeteer/browsers install chrome@stable --path "${cacheDir}"`;
 
 	const manual: ManualInstruction[] = [];
 	const strategy = pickLinuxChromeStrategy(mgr, arch);
@@ -550,37 +556,43 @@ async function resolveLinuxChromeRecipe(): Promise<Recipe> {
 			docs: CHROME_LINUX_DOCS
 		});
 	}
+	manual.push({
+		label: 'Puppeteer browsers CLI',
+		command: pptrDisplay,
+		docs: PPTR_CHROME_DOCS
+	});
 
-	const base: Recipe = {
+	// Try Google Chrome via system package manager (x64, apt/dnf/zypper, requires root).
+	if (strategy) {
+		const elevated = await isElevated();
+		if (elevated) {
+			const base: Recipe = {
+				tool: 'chrome',
+				autoInstallable: false,
+				missingPrereqs: [],
+				manualInstructions: manual
+			};
+			if (!strategy.requiresCurl || attachCurlRequirement(base, 'Google Chrome')) {
+				base.autoInstallable = true;
+				base.shell = { program: 'sh', args: ['-c'] };
+				base.command = [strategy.installCommand];
+				base.displayCommand = strategy.manualCommand;
+				if (strategy.env) base.env = strategy.env;
+				return base;
+			}
+			// curl unavailable for system install — fall through to puppeteer
+		}
+	}
+
+	// Fallback: puppeteer Chrome for Testing (no root needed, all distros and arm64).
+	return {
 		tool: 'chrome',
-		autoInstallable: false,
+		autoInstallable: true,
 		missingPrereqs: [],
-		manualInstructions: manual
+		manualInstructions: manual,
+		command: pptrArgs,
+		displayCommand: pptrDisplay
 	};
-
-	if (!strategy) {
-		base.unavailableReason = arch !== 'x64'
-			? `Google Chrome is only published for Linux x86_64. No Chrome build exists for ${arch}. Download Chrome manually from google.com/chrome.`
-			: `Google Chrome is only available via apt, dnf, or zypper on Linux${mgr ? ` (this system uses ${mgr})` : ' — no supported package manager was detected'}. Download Chrome manually from google.com/chrome.`;
-		return base;
-	}
-
-	if (strategy.requiresCurl && !attachCurlRequirement(base, 'Google Chrome')) {
-		return base;
-	}
-
-	const elevated = await isElevated();
-	if (!elevated) {
-		base.unavailableReason = `Installing Google Chrome via ${strategy.pkgMgrLabel} requires root. Run clopen as root, or install Chrome manually with the command below and retry.`;
-		return base;
-	}
-
-	base.autoInstallable = true;
-	base.shell = { program: 'sh', args: ['-c'] };
-	base.command = [strategy.installCommand];
-	base.displayCommand = strategy.manualCommand;
-	if (strategy.env) base.env = strategy.env;
-	return base;
 }
 
 function pickLinuxChromeStrategy(
@@ -628,104 +640,6 @@ function pickLinuxChromeStrategy(
 	return null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cloudflared recipe — downloads the Cloudflare-signed binary into ~/.clopen/bin
-// ─────────────────────────────────────────────────────────────────────────────
-
-const CLOUDFLARED_RELEASE_BASE = 'https://github.com/cloudflare/cloudflared/releases/latest/download';
-const CLOUDFLARED_DOCS = 'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/';
-
-const CLOUDFLARED_LINUX_ARCH: Record<string, string> = {
-	x64: 'amd64',
-	arm64: 'arm64',
-	arm: 'arm',
-	ia32: '386'
-};
-
-async function resolveCloudflaredRecipe(): Promise<Recipe> {
-	const base: Recipe = {
-		tool: 'cloudflared',
-		autoInstallable: false,
-		missingPrereqs: [],
-		manualInstructions: []
-	};
-
-	const binDir = join(getClopenDir(), 'bin');
-
-	if (process.platform === 'darwin') {
-		const archKey = process.arch === 'arm64' ? 'arm64' : 'amd64';
-		const file = `cloudflared-darwin-${archKey}.tgz`;
-		const url = `${CLOUDFLARED_RELEASE_BASE}/${file}`;
-		const cmd =
-			`mkdir -p "${binDir}" && ` +
-			`curl -fsSL -o "${binDir}/${file}" "${url}" && ` +
-			`tar -xzf "${binDir}/${file}" -C "${binDir}" && ` +
-			`rm -f "${binDir}/${file}" && ` +
-			`chmod +x "${binDir}/cloudflared"`;
-
-		base.manualInstructions.push({
-			label: 'curl + tar',
-			command: cmd,
-			docs: CLOUDFLARED_DOCS
-		});
-		if (!attachCurlRequirement(base, 'Cloudflared')) return base;
-		base.autoInstallable = true;
-		base.shell = { program: 'bash', args: ['-c'] };
-		base.command = [cmd];
-		base.displayCommand = cmd;
-		return base;
-	}
-
-	if (process.platform === 'linux') {
-		const archKey = CLOUDFLARED_LINUX_ARCH[process.arch];
-		if (!archKey) {
-			base.unavailableReason = `Cloudflared has no published Linux build for ${process.arch}.`;
-			return base;
-		}
-		const file = `cloudflared-linux-${archKey}`;
-		const url = `${CLOUDFLARED_RELEASE_BASE}/${file}`;
-		const cmd =
-			`mkdir -p "${binDir}" && ` +
-			`curl -fsSL -o "${binDir}/cloudflared" "${url}" && ` +
-			`chmod +x "${binDir}/cloudflared"`;
-
-		base.manualInstructions.push({
-			label: 'curl',
-			command: cmd,
-			docs: CLOUDFLARED_DOCS
-		});
-		if (!attachCurlRequirement(base, 'Cloudflared')) return base;
-		base.autoInstallable = true;
-		base.shell = { program: 'bash', args: ['-c'] };
-		base.command = [cmd];
-		base.displayCommand = cmd;
-		return base;
-	}
-
-	if (process.platform === 'win32') {
-		const archKey = process.arch === 'ia32' ? '386' : 'amd64';
-		const file = `cloudflared-windows-${archKey}.exe`;
-		const url = `${CLOUDFLARED_RELEASE_BASE}/${file}`;
-		const psCmd =
-			`New-Item -ItemType Directory -Path "${binDir}" -Force | Out-Null; ` +
-			`Invoke-WebRequest -Uri "${url}" -OutFile "${binDir}\\cloudflared.exe"`;
-
-		base.manualInstructions.push({
-			label: 'PowerShell',
-			command: psCmd,
-			docs: CLOUDFLARED_DOCS
-		});
-		base.autoInstallable = true;
-		base.shell = { program: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command'] };
-		base.command = [psCmd];
-		base.displayCommand = psCmd;
-		return base;
-	}
-
-	base.unavailableReason = `Unsupported platform: ${process.platform}`;
-	return base;
-}
-
 /**
  * Resolve the install recipe for a tool on the current platform.
  * Result is platform- and privilege-aware: recipes that would fail
@@ -740,6 +654,5 @@ export async function resolveRecipe(tool: ToolId): Promise<Recipe> {
 		case 'codex': return resolveCodexRecipe();
 		case 'qwen': return resolveQwenRecipe();
 		case 'chrome': return resolveChromeRecipe();
-		case 'cloudflared': return resolveCloudflaredRecipe();
 	}
 }

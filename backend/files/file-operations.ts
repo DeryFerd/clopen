@@ -1,5 +1,5 @@
 import { dirname, extname, join } from 'path';
-import { mkdir as fsMkdir, readdir as fsReaddir, rename as fsRename, stat as fsStat, unlink as fsUnlink, rm as fsRm } from 'node:fs/promises';
+import { mkdir as fsMkdir, readdir as fsReaddir, rename as fsRename, rmdir as fsRmdir, stat as fsStat, unlink as fsUnlink, rm as fsRm } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { validateFileSize } from './file-size-limit';
@@ -62,8 +62,8 @@ async function rm(path: string, options?: { recursive?: boolean }) {
 	await fsRm(path, { recursive: options?.recursive ?? false, force: true });
 }
 
-async function rmdir(path: string, options?: { recursive?: boolean }) {
-	return rm(path, options);
+async function rmdir(path: string) {
+	await fsRmdir(path);
 }
 
 export async function writeFileOperation(filePath: string, content: string, baseModified?: string) {

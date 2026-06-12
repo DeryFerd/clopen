@@ -38,6 +38,23 @@ describe('file-operations — shell-special filenames', () => {
 		await expect(stat(filePath)).rejects.toThrow();
 	});
 
+	test('deleteOperation removes an empty directory', async () => {
+		const dirPath = join(testDir, 'empty-dir');
+		await mkdir(dirPath, { recursive: true });
+
+		await expect(deleteOperation(dirPath)).resolves.toMatchObject({ message: 'Directory deleted successfully' });
+		await expect(stat(dirPath)).rejects.toThrow();
+	});
+
+	test('deleteOperation force-removes a non-empty directory', async () => {
+		const dirPath = join(testDir, 'non-empty-dir');
+		await mkdir(dirPath, { recursive: true });
+		await Bun.write(join(dirPath, 'child.txt'), 'contents');
+
+		await expect(deleteOperation(dirPath, true)).resolves.toMatchObject({ message: 'Directory deleted successfully' });
+		await expect(stat(dirPath)).rejects.toThrow();
+	});
+
 	test('renameOperation renames a file whose name contains shell metacharacters', async () => {
 		const src = join(testDir, SPECIAL_NAME);
 		const dest = join(testDir, 'safe-name.txt');

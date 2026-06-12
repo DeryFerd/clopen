@@ -4,6 +4,8 @@
  */
 
 import { execGit, isGitRepo, getGitRoot } from './git-executor';
+import { resolveBinary } from '../utils/cli';
+import { getCleanSpawnEnv } from '../utils/env';
 import {
 	parseStatus,
 	parseBranches,
@@ -17,6 +19,7 @@ import {
 import type {
 	GitStatus,
 	GitBranchInfo,
+	GitOperation,
 	GitFileDiff,
 	GitLogResult,
 	GitRemote,
@@ -231,9 +234,10 @@ export class GitService {
 	// ============================================
 
 	async getBranches(cwd: string): Promise<GitBranchInfo> {
-		const [localResult, remoteResult] = await Promise.all([
+		const [localResult, remoteResult, headRef] = await Promise.all([
 			execGit(['branch', '-v', '--no-color'], cwd),
-			execGit(['branch', '-r', '-v', '--no-color'], cwd)
+			execGit(['branch', '-r', '-v', '--no-color'], cwd),
+			execGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
 		]);
 
 		// Handle empty repo (no commits yet) — branch command returns empty
@@ -245,6 +249,25 @@ export class GitService {
 		}
 
 		const branchInfo = parseBranches(localResult.stdout, remoteResult.stdout);
+		branchInfo.operation = await this.detectGitOperation(cwd);
+
+		// Resolve the current branch authoritatively instead of trusting the parsed
+		// `git branch -v` text: while HEAD is detached (rebase, bisect, or a detached
+		// checkout) git prints a parenthesized pseudo-ref, which previously leaked
+		// through as a bogus "(no" branch name.
+		const headName = headRef.exitCode === 0 ? headRef.stdout.trim() : '';
+		if (headName === '' || headName === 'HEAD') {
+			// Detached HEAD — show a clean short hash, never a real branch.
+			branchInfo.detached = true;
+			const shortHash = await execGit(['rev-parse', '--short', 'HEAD'], cwd);
+			branchInfo.current = shortHash.exitCode === 0 ? shortHash.stdout.trim() : '';
+			for (const b of branchInfo.local) b.isCurrent = false;
+			return branchInfo;
+		}
+
+		branchInfo.detached = false;
+		branchInfo.current = headName;
+		for (const b of branchInfo.local) b.isCurrent = b.name === headName;
 
 		// Get ahead/behind for current branch
 		if (branchInfo.current) {
@@ -378,9 +401,11 @@ export class GitService {
 		return result.stderr || result.stdout; // git fetch outputs to stderr
 	}
 
-	async pull(cwd: string, remote = 'origin', branch?: string): Promise<{ success: boolean; message: string }> {
+	async pull(cwd: string, remote = 'origin', branch?: string, rebase = false): Promise<{ success: boolean; message: string }> {
 		assertSafeGitRemoteName(remote);
-		const args = ['pull', remote];
+		const args = ['pull'];
+		if (rebase) args.push('--rebase');
+		args.push(remote);
 		if (branch) {
 			assertSafeGitRevish(branch, 'pull branch');
 			args.push(branch);
@@ -407,6 +432,49 @@ export class GitService {
 			success: result.exitCode === 0,
 			message: result.exitCode === 0 ? (result.stderr || result.stdout) : result.stderr
 		};
+	}
+
+	/**
+	 * Advanced push variants surfaced in the "More" menu:
+	 *  - `with-tags`    → push branch + reachable annotated tags (--follow-tags)
+	 *  - `all-tags`     → push all local tags (--tags), no branch
+	 *  - `force-lease`  → safe force push (--force-with-lease)
+	 *  - `force`        → unconditional force push (--force)
+	 */
+	async pushAdvanced(
+		cwd: string,
+		mode: 'with-tags' | 'all-tags' | 'force-lease' | 'force',
+		remote = 'origin',
+		branch?: string
+	): Promise<{ success: boolean; message: string }> {
+		assertSafeGitRemoteName(remote);
+		const args = ['push', remote];
+		if (mode === 'all-tags') {
+			args.push('--tags');
+		} else {
+			if (branch) {
+				assertSafeGitRevish(branch, 'push branch');
+				args.push(branch);
+			}
+			if (mode === 'with-tags') args.push('--follow-tags');
+			else if (mode === 'force-lease') args.push('--force-with-lease');
+			else if (mode === 'force') args.push('--force');
+			args.push('-u');
+		}
+		const result = await execGit(args, cwd, 60000);
+		return {
+			success: result.exitCode === 0,
+			message: result.exitCode === 0 ? (result.stderr || result.stdout) : result.stderr
+		};
+	}
+
+	/** Fetch every configured remote and prune deleted remote-tracking refs. */
+	async fetchAll(cwd: string): Promise<string> {
+		const result = await execGit(['fetch', '--all', '--prune', '--tags'], cwd, 60000);
+		if (result.exitCode !== 0) {
+			throw new Error(`git fetch --all failed: ${result.stderr}`);
+		}
+		return result.stderr || result.stdout;
 	}
 
 	async addRemote(cwd: string, name: string, url: string): Promise<void> {
@@ -596,14 +664,38 @@ export class GitService {
 	 * For stash conflicts (no sentinel) we fall back to `git reset --merge`,
 	 * which unwinds the unmerged paths while keeping unrelated local edits.
 	 */
+	/** Resolve the absolute git dir for a working tree (handles worktrees/.git files). */
+	private async resolveGitDir(cwd: string): Promise<string> {
+		const { join } = await import('node:path');
+		const result = await execGit(['rev-parse', '--git-dir'], cwd);
+		const raw = result.exitCode === 0 ? result.stdout.trim() : '.git';
+		return raw.startsWith('/') ? raw : join(cwd, raw);
+	}
+
+	/**
+	 * Detect an in-progress operation (rebase, merge, cherry-pick, revert, bisect)
+	 * by probing the sentinel files git writes under the git dir. Returns null when
+	 * the working tree is in a normal state.
+	 */
+	private async detectGitOperation(cwd: string): Promise<GitOperation | null> {
+		const { existsSync } = await import('node:fs');
+		const { join } = await import('node:path');
+		const gitDir = await this.resolveGitDir(cwd);
+		const has = (name: string) => existsSync(join(gitDir, name));
+
+		if (has('rebase-merge') || has('rebase-apply')) return 'rebase';
+		if (has('MERGE_HEAD')) return 'merge';
+		if (has('CHERRY_PICK_HEAD')) return 'cherry-pick';
+		if (has('REVERT_HEAD')) return 'revert';
+		if (has('BISECT_LOG')) return 'bisect';
+		return null;
+	}
+
 	async abortMerge(cwd: string): Promise<void> {
 		const { existsSync } = await import('node:fs');
 		const { join } = await import('node:path');
 
-		const gitDirResult = await execGit(['rev-parse', '--git-dir'], cwd);
-		const gitDirRaw = gitDirResult.exitCode === 0 ? gitDirResult.stdout.trim() : '.git';
-		const gitDir = gitDirRaw.startsWith('/') ? gitDirRaw : join(cwd, gitDirRaw);
-
+		const gitDir = await this.resolveGitDir(cwd);
 		const has = (name: string) => existsSync(join(gitDir, name));
 
 		let args: string[] | null = null;
@@ -626,6 +718,92 @@ export class GitService {
 		if (reset.exitCode !== 0) {
 			throw new Error(`git reset --merge failed: ${reset.stderr}`);
 		}
+	}
+
+	// ============================================
+	// History rewrite / undo
+	// ============================================
+
+	/**
+	 * Undo the last commit by moving HEAD back one commit.
+	 *  - `soft`  keeps the changes staged
+	 *  - `mixed` keeps the changes in the working tree (unstaged)
+	 *  - `hard`  discards the changes entirely (destructive)
+	 */
+	async undoLastCommit(cwd: string, mode: 'soft' | 'mixed' | 'hard'): Promise<void> {
+		const flag = mode === 'soft' ? '--soft' : mode === 'hard' ? '--hard' : '--mixed';
+		const result = await execGit(['reset', flag, 'HEAD~1'], cwd);
+		if (result.exitCode !== 0) {
+			throw new Error(`git reset ${flag} failed: ${result.stderr}`);
+		}
+	}
+
+	/** Create a new commit that reverses a previous one (default: HEAD). */
+	async revertCommit(cwd: string, ref = 'HEAD'): Promise<{ success: boolean; message: string }> {
+		assertSafeGitRevish(ref, 'revert ref');
+		const result = await execGit(['revert', '--no-edit', ref], cwd);
+		return {
+			success: result.exitCode === 0,
+			message: result.exitCode === 0 ? (result.stdout || result.stderr) : result.stderr
+		};
+	}
+
+	// ============================================
+	// Maintenance
+	// ============================================
+
+	/** Remove untracked files and directories (`git clean -fd`). */
+	async cleanUntracked(cwd: string): Promise<string> {
+		const result = await execGit(['clean', '-fd'], cwd);
+		if (result.exitCode !== 0) {
+			throw new Error(`git clean failed: ${result.stderr}`);
+		}
+		return result.stdout.trim();
+	}
+
+	/** Run garbage collection to optimize the repository. */
+	async optimize(cwd: string): Promise<string> {
+		const result = await execGit(['gc'], cwd, 180000);
+		if (result.exitCode !== 0) {
+			throw new Error(`git gc failed: ${result.stderr}`);
+		}
+		return (result.stderr || result.stdout).trim() || 'Repository optimized';
+	}
+
+	// ============================================
+	// npm version
+	// ============================================
+
+	/**
+	 * Bump the package version with `npm version <patch|minor|major>`. In a git
+	 * repo npm creates the version-bump commit and tag automatically. Requires a
+	 * clean working tree (npm refuses otherwise) — that error is surfaced verbatim.
+	 */
+	async npmVersion(
+		cwd: string,
+		bump: 'patch' | 'minor' | 'major'
+	): Promise<{ success: boolean; version: string; message: string }> {
+		const npmPath = resolveBinary('npm');
+		if (!npmPath) {
+			throw new Error('npm binary not found on PATH');
+		}
+		const proc = Bun.spawn([npmPath, 'version', bump], {
+			cwd,
+			stdout: 'pipe',
+			stderr: 'pipe',
+			env: { ...getCleanSpawnEnv() }
+		});
+		const [stdout, stderr] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text()
+		]);
+		const exitCode = await proc.exited;
+		if (exitCode !== 0) {
+			return { success: false, version: '', message: (stderr || stdout).trim() };
+		}
+		// npm prints the new version (e.g. "v1.2.3") on stdout.
+		const version = stdout.trim().split('\n').pop()?.trim() || '';
+		return { success: true, version, message: version };
 	}
 }
 

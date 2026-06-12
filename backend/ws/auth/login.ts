@@ -17,6 +17,7 @@ import { settingsQueries, auditLogQueries } from '$backend/database/queries';
 import { getTokenType } from '$backend/auth/tokens';
 import { authRateLimiter } from '$backend/auth/rate-limiter';
 import { ws } from '$backend/utils/ws';
+import { clientIpFromConnection } from '$backend/utils/client-ip';
 
 const authUserSchema = t.Object({
 	id: t.String(),
@@ -50,6 +51,14 @@ export const loginHandler = createRouter()
 		parsed.authMode = 'required';
 		settingsQueries.set('system:settings', JSON.stringify(parsed));
 
+		auditLogQueries.logEvent({
+			userId: result.user.id,
+			actorUserId: result.user.id,
+			eventType: 'auth:setup',
+			eventDetails: `Admin account created: ${result.user.name}`,
+			ipAddress: clientIpFromConnection(conn)
+		});
+
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
 		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
@@ -81,6 +90,14 @@ export const loginHandler = createRouter()
 		// Create or get default admin
 		const result = createOrGetNoAuthAdmin();
 
+		auditLogQueries.logEvent({
+			userId: result.user.id,
+			actorUserId: result.user.id,
+			eventType: 'auth:setup-no-auth',
+			eventDetails: `No-auth mode enabled, admin: ${result.user.name}`,
+			ipAddress: clientIpFromConnection(conn)
+		});
+
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
 		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
@@ -102,6 +119,14 @@ export const loginHandler = createRouter()
 		}
 
 		const result = createOrGetNoAuthAdmin();
+
+		auditLogQueries.logEvent({
+			userId: result.user.id,
+			actorUserId: result.user.id,
+			eventType: 'auth:auto-login-no-auth',
+			eventDetails: `Auto-login in no-auth mode: ${result.user.name}`,
+			ipAddress: clientIpFromConnection(conn)
+		});
 
 		// Set auth on connection
 		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -148,7 +173,7 @@ export const loginHandler = createRouter()
 				actorUserId: result.user.id,
 				eventType: 'auth:login',
 				eventDetails: `User ${result.user.name} logged in via ${tokenType} token`,
-				ipAddress: ip
+				ipAddress: clientIpFromConnection(conn)
 			});
 
 			ws.setAuth(conn, result.user.id, result.user.role, result.tokenHash);
@@ -192,6 +217,14 @@ export const loginHandler = createRouter()
 			const result = createUserFromInvite(data.inviteToken, data.name);
 
 			authRateLimiter.recordSuccess(ip);
+
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:accept-invite',
+				eventDetails: `User ${result.user.name} created account via invite`,
+				ipAddress: clientIpFromConnection(conn)
+			});
 
 			// Set auth on connection
 			const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
@@ -249,7 +282,7 @@ export const loginHandler = createRouter()
 				actorUserId: userId,
 				eventType: 'auth:logout',
 				eventDetails: 'User logged out',
-				ipAddress: ws.getRemoteAddress(conn)
+				ipAddress: clientIpFromConnection(conn)
 			});
 		}
 		return { success: true };
@@ -281,7 +314,7 @@ export const loginHandler = createRouter()
 			actorUserId: adminId,
 			eventType: 'auth:logout-all',
 			eventDetails: `Admin logged out all sessions (${count} sessions cleared)`,
-			ipAddress: ws.getRemoteAddress(conn)
+			ipAddress: clientIpFromConnection(conn)
 		});
 		return { count };
 	})

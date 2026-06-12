@@ -16,12 +16,13 @@
 
 import { Elysia } from 'elysia';
 import { join } from 'node:path';
-import { mkdir, rename, stat, unlink } from 'node:fs/promises';
+import { link, mkdir, stat, unlink } from 'node:fs/promises';
 
 import { debug } from '$shared/utils/logger';
 import { hashToken } from '../auth/tokens';
-import { authQueries } from '../database/queries';
-import { requireFilePathAccessFor } from '../ws/files/path-access';
+import { authQueries, fileAuditLogQueries } from '../database/queries';
+import { findContainingProjectId, requireFilePathAccessFor } from '../ws/files/path-access';
+import { clientIpFromRequest } from '../utils/client-ip';
 import { validateFileSize } from '../files/file-size-limit';
 
 type AuthIdentity = { userId: string; role: string };
@@ -50,7 +51,7 @@ function authenticate(request: Request): AuthIdentity {
 	return { userId: user.id, role: user.role };
 }
 
-export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ request, query }) => {
+export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ request, query, server }) => {
 	let identity: AuthIdentity;
 	try {
 		identity = authenticate(request);
@@ -71,9 +72,24 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response('Invalid fileSize query parameter', { status: 400 });
 	}
 
+	const ipAddress = clientIpFromRequest(request, server);
+	const userAgent = request.headers.get('user-agent') ?? undefined;
+	const projectId = await findContainingProjectId(`${targetPathParam}/${fileNameParam}`);
+
 	try {
 		validateFileSize(fileSizeParam);
 	} catch (error) {
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			projectId,
+			action: 'upload',
+			filePath: `${targetPathParam}/${fileNameParam}`,
+			fileSize: fileSizeParam,
+			ipAddress,
+			userAgent,
+			success: false,
+			errorMessage: 'File too large'
+		});
 		return new Response(error instanceof Error ? error.message : 'Invalid file size', { status: 413 });
 	}
 
@@ -85,6 +101,17 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		resolvedFinal = await requireFilePathAccessFor(tentativeFinal, identity.role, identity.userId);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Access denied';
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			projectId,
+			action: 'upload',
+			filePath: `${targetPathParam}/${fileNameParam}`,
+			fileSize: fileSizeParam,
+			ipAddress,
+			userAgent,
+			success: false,
+			errorMessage: 'Path access denied'
+		});
 		return new Response(message, { status: 403 });
 	}
 
@@ -98,7 +125,19 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response(message, { status: 500 });
 	}
 
+	// Early existence check — fast-path rejection before streaming the body
 	if (await Bun.file(resolvedFinal).exists()) {
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			projectId,
+			action: 'upload',
+			filePath: resolvedFinal,
+			fileSize: fileSizeParam,
+			ipAddress,
+			userAgent,
+			success: false,
+			errorMessage: 'File already exists'
+		});
 		return new Response('File already exists', { status: 409 });
 	}
 
@@ -106,6 +145,9 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 		return new Response('Request body is empty', { status: 400 });
 	}
 
+	// Stream to a unique temp file, then atomically link into place.
+	// link() uses O_EXCL semantics — fails with EEXIST if final already exists.
+	// The final path only appears with full content (no partial-file visibility).
 	const tempPath = `${resolvedFinal}.${crypto.randomUUID()}.partial`;
 	const writer = Bun.file(tempPath).writer();
 	let written = 0;
@@ -141,17 +183,57 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			validateFileSize(written);
 		} catch (error) {
 			await unlink(tempPath).catch(() => {});
+			fileAuditLogQueries.logOperation({
+				userId: identity.userId,
+				projectId,
+				action: 'upload',
+				filePath: resolvedFinal,
+				fileSize: written,
+				ipAddress,
+				userAgent,
+				success: false,
+				errorMessage: 'File too large'
+			});
 			return new Response(error instanceof Error ? error.message : 'File too large', { status: 413 });
 		}
 
-		// Race-check: refuse to overwrite if the destination appeared mid-upload.
-		if (await Bun.file(resolvedFinal).exists()) {
+		// Atomic exclusive link — fails with EEXIST if final already exists
+		try {
+			await link(tempPath, resolvedFinal);
+		} catch (error: unknown) {
+			if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+				await unlink(tempPath).catch(() => {});
+				return new Response('File already exists', { status: 409 });
+			}
 			await unlink(tempPath).catch(() => {});
-			return new Response('File already exists', { status: 409 });
+			fileAuditLogQueries.logOperation({
+				userId: identity.userId,
+				projectId,
+				action: 'upload',
+				filePath: resolvedFinal,
+				fileSize: written,
+				ipAddress,
+				userAgent,
+				success: false,
+				errorMessage: `link() failed: ${(error as Error).message}`
+			});
+			throw error;
 		}
 
-		await rename(tempPath, resolvedFinal);
+		// Clean up temp — the real file is now the hard-link
+		await unlink(tempPath).catch(() => {});
+
 		const stats = await stat(resolvedFinal);
+
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			projectId,
+			action: 'upload',
+			filePath: resolvedFinal,
+			fileSize: stats.size,
+			ipAddress,
+			userAgent
+		});
 
 		return Response.json({
 			message: 'File uploaded successfully',
@@ -160,9 +242,20 @@ export const filesUploadRoute = new Elysia().post('/api/files/upload', async ({ 
 			modified: stats.mtime.toISOString()
 		});
 	} catch (error) {
-		await cleanupTemp();
+		await unlink(tempPath).catch(() => {});
 		debug.error('file', 'HTTP upload error:', error);
 		const message = error instanceof Error ? error.message : 'Upload failed';
+		fileAuditLogQueries.logOperation({
+			userId: identity.userId,
+			projectId,
+			action: 'upload',
+			filePath: resolvedFinal,
+			fileSize: written,
+			ipAddress,
+			userAgent,
+			success: false,
+			errorMessage: message
+		});
 		return new Response(message, { status: 500 });
 	}
 });

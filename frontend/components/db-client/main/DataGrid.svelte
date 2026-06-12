@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Icon from '$frontend/components/common/display/Icon.svelte';
 	import ConfirmDestructive from '../shared/ConfirmDestructive.svelte';
+	import CellViewer from '../shared/CellViewer.svelte';
 	import RowForm from '../shared/RowForm.svelte';
 	import Checkbox from '../shared/Checkbox.svelte';
 	import NullValue from '../shared/NullValue.svelte';
@@ -19,9 +21,11 @@
 		objectName: string;
 		database?: string;
 		schema?: string;
+		/** Pre-applied filter (foreign-key jump / history replay). */
+		filter?: { column: string; op: string; value: string } | null;
 	}
 
-	const { connectionId, driver, objectName, database, schema }: Props = $props();
+	const { connectionId, driver, objectName, database, schema, filter = null }: Props = $props();
 
 	type SortDir = 'asc' | 'desc' | null;
 
@@ -73,6 +77,51 @@
 	let selected = $state<Set<number>>(new Set());
 	let confirmDelete = $state(false);
 	let insertOpen = $state(false);
+
+	let cellOpen = $state(false);
+	let cellColumn = $state('');
+	let cellValue = $state<unknown>(null);
+	let cellRowIdx = $state(-1);
+
+	const fkMap = $derived(new Map((details?.foreignKeys ?? []).map((fk) => [fk.column, fk])));
+
+	const cellFk = $derived(cellColumn ? fkMap.get(cellColumn) ?? null : null);
+	const cellNullable = $derived(
+		(details?.columns ?? []).find((c) => c.name === cellColumn)?.nullable ?? false
+	);
+
+	function openCell(rowIdx: number, col: string, value: unknown): void {
+		cellRowIdx = rowIdx;
+		cellColumn = col;
+		cellValue = value;
+		cellOpen = true;
+	}
+
+	// Stage an edit made from the cell viewer the same way an inline edit is
+	// staged — it joins pendingChanges and is written on "Save changes".
+	function saveCell(value: unknown): void {
+		if (cellRowIdx < 0 || !cellColumn) return;
+		const key = pkKey(cellRowIdx);
+		const map = new Map(pendingChanges);
+		const existing = map.get(key) ?? {};
+		map.set(key, { ...existing, [cellColumn]: value });
+		pendingChanges = map;
+	}
+
+	function jumpToFk(col: string, value: unknown): void {
+		const fk = fkMap.get(col);
+		if (!fk || value === null || value === undefined) return;
+		// Carry the filter on the active object so back/forward history replays
+		// the same filtered view of the referenced table.
+		dbClientStore.setActiveObject(connectionId, {
+			name: fk.refTable,
+			type: 'table',
+			database,
+			schema,
+			filter: { column: fk.refColumn, op: '=', value: String(value) }
+		});
+		dbClientStore.setView(connectionId, 'data');
+	}
 
 	let showSearch = $state(false);
 	let conditions = $state<FilterCondition[]>([]);
@@ -229,14 +278,48 @@
 	}
 
 	$effect(() => {
+		// Re-evaluate on object change, explicit (re)selection, and history jumps
+		// (navObjectTick). The pre-applied filter is read untracked and consumed,
+		// so switching tabs (which remounts the grid) or reloading the same object
+		// never re-applies a filter the user has navigated past — while back/forward
+		// still replays it, because each history jump bumps the tick and re-seeds
+		// the filter from its own snapshot copy.
+		const tick = dbClientStore.navObjectTick;
+		const objKey = `${connectionId}::${objectName}`;
+		void objKey;
 		if (objectName && connectionId) {
+			// Apply the relation filter once per navigation. Claimed untracked so it
+			// neither re-triggers this effect nor mutates the object history relies on.
+			const applied = untrack(() =>
+				filter && dbClientStore.claimFilterApplication(connectionId, tick) ? filter : null
+			);
 			page = 0;
-			conditions = [];
 			sortColumn = null;
 			sortDir = null;
 			totalRows = null;
+			if (applied) {
+				conditions = [{ column: applied.column, op: applied.op as Operator, value: applied.value }];
+				showSearch = true;
+			} else {
+				conditions = [];
+			}
 			load();
 		}
+	});
+
+	// External reload signal (e.g. after truncate/reset on this object).
+	// Tracks only dataNonce; reads object refs untracked so switching tables
+	// doesn't double-load via this effect.
+	let dataSignalReady = false;
+	$effect(() => {
+		dbClientStore.dataNonce;
+		untrack(() => {
+			if (dataSignalReady && objectName && connectionId) {
+				totalRows = null;
+				load();
+			}
+			dataSignalReady = true;
+		});
 	});
 
 	function applyFilter(): void {
@@ -661,8 +744,8 @@
 		{#if error}
 			<pre class="p-3 text-sm text-red-600 dark:text-red-400 whitespace-pre-wrap">{error}</pre>
 		{:else if result && (result.rows?.length ?? 0) > 0}
-			<table class="w-full text-sm border-collapse">
-				<thead class="sticky top-0 bg-slate-100 dark:bg-slate-900 z-10">
+			<table class="w-full text-sm border-collapse bg-slate-50 dark:bg-slate-800/50">
+				<thead class="sticky top-0 bg-slate-200 dark:bg-slate-800 z-10">
 					<tr>
 						<th class="px-3 py-1.5 w-8 border-b border-slate-200 dark:border-slate-800">
 							<Checkbox disabled={!hasPk} checked={selected.size > 0 && selected.size === result.rows.length} onchange={toggleAll} />
@@ -693,20 +776,46 @@
 				</thead>
 				<tbody>
 					{#each result.rows as row, i (i)}
-						<tr class="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-							<td class="px-3 py-1.5 border-b border-slate-100 dark:border-slate-900">
+						<tr class="hover:bg-slate-100 dark:hover:bg-slate-800/60">
+							<td class="px-3 py-1.5 border-b border-slate-100 dark:border-slate-800">
 								<Checkbox disabled={!hasPk} checked={selected.has(i)} onchange={() => toggleSelect(i)} />
 							</td>
-							<td class="px-3 py-1.5 text-slate-400 border-b border-slate-100 dark:border-slate-900">{page * pageSize + i + 1}</td>
+							<td class="px-3 py-1.5 text-slate-400 border-b border-slate-100 dark:border-slate-800">{page * pageSize + i + 1}</td>
 							{#each result.columns as col (col.name)}
 								{@const isEditing = editing?.rowIdx === i && editing.col === col.name}
 								{@const pendingVal = pendingChanges.get(pkKey(i))?.[col.name]}
 								{@const display = pendingVal !== undefined ? pendingVal : row[col.name]}
 								<td
-									class="px-3 py-1.5 border-b border-slate-100 dark:border-slate-900 text-slate-700 dark:text-slate-300 max-w-[400px] {pendingVal !== undefined ? 'bg-amber-50 dark:bg-amber-900/20' : ''}"
+									class="relative group px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 max-w-[400px] {pendingVal !== undefined ? 'bg-amber-50 dark:bg-amber-900/20' : ''}"
 									ondblclick={() => startEdit(i, col.name, display)}
 									title={hasPk ? 'Double-click to edit' : 'Read-only (no PK)'}
 								>
+									{#if !isEditing}
+										<div class="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5">
+											{#if fkMap.has(col.name) && !isNullish(display)}
+												<button
+													type="button"
+													class="flex items-center justify-center w-5 h-5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 shadow-sm"
+													title={`Go to ${fkMap.get(col.name)?.refTable}`}
+													onmousedown={(e) => e.stopPropagation()}
+													onclick={(e) => { e.stopPropagation(); jumpToFk(col.name, display); }}
+												>
+													<Icon name="lucide:arrow-up-right" class="w-3 h-3" />
+												</button>
+											{/if}
+											{#if !isNullish(display)}
+												<button
+													type="button"
+													class="flex items-center justify-center w-5 h-5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 shadow-sm"
+													title="View value"
+													onmousedown={(e) => e.stopPropagation()}
+													onclick={(e) => { e.stopPropagation(); openCell(i, col.name, display); }}
+												>
+													<Icon name="lucide:maximize-2" class="w-3 h-3" />
+												</button>
+											{/if}
+										</div>
+									{/if}
 									{#if isEditing}
 										{@const colMeta = details?.columns?.find((c) => c.name === col.name)}
 										<div class="flex items-start gap-1.5">
@@ -755,6 +864,11 @@
 		bind:isOpen={insertOpen}
 		title={`Insert into ${objectName}`}
 		columns={details.columns}
+		foreignKeys={details.foreignKeys ?? []}
+		{connectionId}
+		{driver}
+		{database}
+		{schema}
 		onSubmit={doInsert}
 		onClose={() => (insertOpen = false)}
 	/>
@@ -767,4 +881,20 @@
 	confirmText="Delete"
 	onConfirm={doDelete}
 	onClose={() => (confirmDelete = false)}
+/>
+
+<CellViewer
+	bind:isOpen={cellOpen}
+	column={cellColumn}
+	value={cellValue}
+	table={objectName}
+	editable={hasPk}
+	nullable={cellNullable}
+	onSave={saveCell}
+	fk={cellFk}
+	{connectionId}
+	{driver}
+	{database}
+	{schema}
+	onClose={() => (cellOpen = false)}
 />

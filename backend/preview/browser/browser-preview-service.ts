@@ -610,6 +610,10 @@ export class BrowserPreviewService extends EventEmitter {
 class BrowserPreviewServiceManager {
 	private services = new Map<string, BrowserPreviewService>();
 
+	// Whether the singleton browserMcpControl listeners have been registered.
+	// Guards against re-registering (and leaking) listeners on the shared emitter.
+	private mcpForwardingSetup = false;
+
 	/**
 	 * Get or create a BrowserPreviewService for a project
 	 */
@@ -617,6 +621,9 @@ class BrowserPreviewServiceManager {
 		if (!projectId) {
 			throw new Error('projectId is required and cannot be empty');
 		}
+
+		// Register singleton MCP control forwarding once (idempotent).
+		this.setupMcpControlForwarding();
 
 		if (!this.services.has(projectId)) {
 			debug.log('preview', `🆕 Creating new BrowserPreviewService for project: ${projectId}`);
@@ -669,26 +676,29 @@ class BrowserPreviewServiceManager {
 			ws.emit.project(projectId, 'preview:browser-navigation-spa', data);
 		});
 
-		// Forward tab events
+		// Forward tab events. Each carries projectId so the frontend can drop
+		// events for a project it has since switched away from — without it, a
+		// background stream (or a late event) could create/mutate tabs in the
+		// project the user is now viewing.
 		service.on('preview:browser-tab-opened', (data) => {
 			debug.log('preview', `🚀 Forwarding preview:browser-tab-opened to project ${projectId}:`, data);
-			ws.emit.project(projectId, 'preview:browser-tab-opened', data);
+			ws.emit.project(projectId, 'preview:browser-tab-opened', { ...data, projectId });
 		});
 
 		service.on('preview:browser-tab-closed', (data) => {
-			ws.emit.project(projectId, 'preview:browser-tab-closed', data);
+			ws.emit.project(projectId, 'preview:browser-tab-closed', { ...data, projectId });
 		});
 
 		service.on('preview:browser-tab-switched', (data) => {
-			ws.emit.project(projectId, 'preview:browser-tab-switched', data);
+			ws.emit.project(projectId, 'preview:browser-tab-switched', { ...data, projectId });
 		});
 
 		service.on('preview:browser-tab-navigated', (data) => {
-			ws.emit.project(projectId, 'preview:browser-tab-navigated', data);
+			ws.emit.project(projectId, 'preview:browser-tab-navigated', { ...data, projectId });
 		});
 
 		service.on('preview:browser-viewport-changed', (data) => {
-			ws.emit.project(projectId, 'preview:browser-viewport-changed', data);
+			ws.emit.project(projectId, 'preview:browser-viewport-changed', { ...data, projectId });
 		});
 
 		// Forward console events
@@ -752,10 +762,39 @@ class BrowserPreviewServiceManager {
 			ws.emit.project(projectId, 'preview:browser-new-window', data);
 		});
 
-		// Forward MCP control events (from singleton browserMcpControl)
+		// MCP control events come from the singleton browserMcpControl, so their
+		// listeners are registered once globally (see setupMcpControlForwarding) —
+		// NOT here, which runs per-project and would leak listeners onto the
+		// singleton as projects are opened.
+
+		debug.log('preview', `🎉 All WebSocket event listeners registered for project: ${projectId}`);
+	}
+
+	/**
+	 * Setup WebSocket forwarding for the singleton browserMcpControl.
+	 *
+	 * Registered exactly once for the whole manager. The emitter is a singleton
+	 * shared across all projects, so attaching these listeners per-project would
+	 * accumulate them without bound (MaxListenersExceededWarning). MCP control
+	 * events are not project-scoped at the source, so we broadcast them to every
+	 * currently-active project; the frontend filters by tab/session.
+	 */
+	private setupMcpControlForwarding(): void {
+		if (this.mcpForwardingSetup) return;
+		this.mcpForwardingSetup = true;
+
+		const emitToActiveProjects = <K extends Parameters<typeof ws.emit.project>[1]>(
+			event: K,
+			payload: Parameters<typeof ws.emit.project<K>>[2]
+		) => {
+			for (const projectId of this.services.keys()) {
+				ws.emit.project(projectId, event, payload);
+			}
+		};
+
 		browserMcpControl.on('control-start', (data) => {
-			debug.log('preview', `🚀 Forwarding mcp-control-start to project ${projectId}:`, data);
-			ws.emit.project(projectId, 'preview:browser-mcp-control-start', {
+			debug.log('preview', '🚀 Forwarding mcp-control-start:', data);
+			emitToActiveProjects('preview:browser-mcp-control-start', {
 				browserTabId: data.browserTabId,
 				chatSessionId: data.chatSessionId,
 				timestamp: data.timestamp
@@ -763,16 +802,15 @@ class BrowserPreviewServiceManager {
 		});
 
 		browserMcpControl.on('control-end', (data) => {
-			debug.log('preview', `🚀 Forwarding mcp-control-end to project ${projectId}:`, data);
-			ws.emit.project(projectId, 'preview:browser-mcp-control-end', {
+			debug.log('preview', '🚀 Forwarding mcp-control-end:', data);
+			emitToActiveProjects('preview:browser-mcp-control-end', {
 				browserTabId: data.browserTabId,
 				timestamp: data.timestamp
 			});
 		});
 
-		// Forward MCP cursor events
 		browserMcpControl.on('cursor-position', (data) => {
-			ws.emit.project(projectId, 'preview:browser-mcp-cursor-position', {
+			emitToActiveProjects('preview:browser-mcp-cursor-position', {
 				sessionId: data.tabId,
 				x: data.x,
 				y: data.y,
@@ -782,7 +820,7 @@ class BrowserPreviewServiceManager {
 		});
 
 		browserMcpControl.on('cursor-click', (data) => {
-			ws.emit.project(projectId, 'preview:browser-mcp-cursor-click', {
+			emitToActiveProjects('preview:browser-mcp-cursor-click', {
 				sessionId: data.tabId,
 				x: data.x,
 				y: data.y,
@@ -792,14 +830,12 @@ class BrowserPreviewServiceManager {
 		});
 
 		browserMcpControl.on('test-completed', (data) => {
-			ws.emit.project(projectId, 'preview:browser-mcp-test-completed', {
+			emitToActiveProjects('preview:browser-mcp-test-completed', {
 				sessionId: data.tabId,
 				timestamp: data.timestamp,
 				source: 'mcp'
 			});
 		});
-
-		debug.log('preview', `🎉 All WebSocket event listeners registered for project: ${projectId}`);
 	}
 
 	/**

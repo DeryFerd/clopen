@@ -77,20 +77,20 @@ This document provides guidelines for Claude Code when working on the Clopen pro
 
 ## DO NOT
 
-- ❌ Run dev/build commands during development
-- ❌ Create documentation files without request
-- ❌ Proceed without confirmation after each stage
-- ❌ Use console.* directly (use debug module instead)
-- ❌ Change technical stack decisions independently
+- Run dev/build commands during development
+- Create documentation files without request
+- Proceed without confirmation after each stage
+- Use console.* directly (use debug module instead)
+- Change technical stack decisions independently
 
 ---
 
 ## DO
 
-- ✅ Follow established patterns
-- ✅ Run `bun run check` and `bun run lint` after coding
-- ✅ Stop and wait for confirmation between stages
-- ✅ Communicate before making significant changes
-- ✅ Use TypeScript throughout
-- ✅ Follow Svelte 5 runes system
-- ✅ Use debug module for logging
+- Follow established patterns
+- Run `bun run check` and `bun run lint` after coding
+- Stop and wait for confirmation between stages
+- Communicate before making significant changes
+- Use TypeScript throughout
+- Follow Svelte 5 runes system
+- Use debug module for logging

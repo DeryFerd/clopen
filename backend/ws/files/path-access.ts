@@ -75,6 +75,27 @@ export async function requireFilePathAccessFor(filePath: string, role: string | 
 	throw new Error('Access denied');
 }
 
+/**
+ * Best-effort resolution of the project that contains a path, for audit
+ * logging. Returns the most specific (longest-root) containing project's id,
+ * or null when the path lives outside every registered project. Makes no
+ * access decision — callers enforce access separately.
+ */
+export async function findContainingProjectId(filePath: string): Promise<string | null> {
+	const normalizedPath = await resolveRealPath(filePath);
+	let containing: Project | null = null;
+	let containingRootLen = -1;
+	for (const project of projectQueries.getAll()) {
+		if (!(await isPathInside(project.path, normalizedPath))) continue;
+		const projectRoot = await resolveRealPath(project.path);
+		if (projectRoot.length > containingRootLen) {
+			containing = project;
+			containingRootLen = projectRoot.length;
+		}
+	}
+	return containing?.id ?? null;
+}
+
 // Picker-style guard: allow paths inside the user's accessible projects OR
 // outside every registered project. Rejects only when the path lives inside
 // another project the user cannot access. Used by FolderBrowser flows that

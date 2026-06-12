@@ -59,6 +59,11 @@ interface AppState {
 	// App Loading State
 	isAppLoading: boolean;
 	isAppInitialized: boolean;
+
+	// Project-switch transition: true while docks are being torn down and the
+	// new project's workspace is being restored. Drives the uniform dock
+	// skeletons so every dock reveals together and no stale data leaks through.
+	isSwitching: boolean;
 }
 
 // Core app state using Svelte 5 runes
@@ -86,7 +91,10 @@ export const appState = $state<AppState>({
 
 	// App Loading State
 	isAppLoading: true,
-	isAppInitialized: false
+	isAppInitialized: false,
+
+	// Project-switch transition
+	isSwitching: false
 });
 
 // ========================================
@@ -117,10 +125,13 @@ export function updateSessionProcessState(
 
 /**
  * Sync global convenience flags from a session's per-session state.
- * Call when switching sessions to derive global state from the new session.
+ * Call whenever the actively-viewed session changes (switch session/project)
+ * so the global flags always reflect the session on screen and never carry
+ * stale state (e.g. "Waiting for your input") over from the previous one.
+ * Pass null/undefined when no session is active to reset to idle defaults.
  */
-export function syncGlobalStateFromSession(sessionId: string): void {
-	const state = appState.sessionStates[sessionId] ?? DEFAULT_SESSION_STATE;
+export function syncGlobalStateFromSession(sessionId: string | null | undefined): void {
+	const state = (sessionId ? appState.sessionStates[sessionId] : undefined) ?? DEFAULT_SESSION_STATE;
 	appState.isLoading = state.isLoading;
 	appState.isWaitingInput = state.isWaitingInput;
 	appState.isRestoring = state.isRestoring;

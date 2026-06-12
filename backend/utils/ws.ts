@@ -33,6 +33,7 @@ import type { WSAPI } from '$backend/ws';
 import type { WSConnection } from '$shared/utils/ws-server';
 import { encodeBinaryMessage, isBinaryAction } from '$shared/utils/ws-server';
 import { debug } from '$shared/utils/logger';
+import { clientIpFromConnection } from './client-ip';
 
 /**
  * Performance configuration
@@ -571,11 +572,13 @@ class WSServer {
 	}
 
 	/**
-	 * Get remote IP address of a connection.
+	 * Get remote IP address of a connection as a stable rate-limit key.
+	 * Falls back to 'unknown' so callers always have a non-null bucket key.
+	 * For audit trails (which should record null, not a sentinel), use
+	 * `clientIpFromConnection` directly.
 	 */
 	getRemoteAddress(conn: WSConnection): string {
-		const raw = (conn as any).raw;
-		return raw?.remoteAddress ?? 'unknown';
+		return clientIpFromConnection(conn) ?? 'unknown';
 	}
 
 	/**
@@ -747,7 +750,9 @@ class WSServer {
 
 			const room = this.projectRooms.get(projectId);
 			if (!room || room.size === 0) {
-				debug.warn('websocket', `No connections in project room: ${projectId} for event: ${String(event)}`);
+				// Expected/benign: e.g. a background terminal in a project the client
+				// has switched away from keeps emitting output to an empty room.
+				debug.log('websocket', `No connections in project room: ${projectId} for event: ${String(event)}`);
 				return;
 			}
 

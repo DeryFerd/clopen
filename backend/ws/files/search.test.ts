@@ -1,45 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-
-// Import the createSafeRegex function - we need to extract it for testing
-// Since it's not exported, we'll replicate the logic here for testing
-const REDOS_PATTERNS = [
-	/\(.*[+*?{].*\)[+*?{]/,          // nested quantifiers like (a+)+, (.*)+, or (x{1,5})+
-	/\([^)]*\|[^)]*\)[+*?{]/,        // ANY alternation under quantifier: (a|aa)+, (foo|bar)+
-	/\[[^\]]+\]\s*[+*?]\s*\[[^\]]+\]\s*[+*?]/,  // adjacent char-class quantifiers
-];
-
-const REGEX_TIMEOUT_MS = 100;
-
-function createSafeRegex(pattern: string, flags: string): RegExp | null {
-	// Check against ReDoS heuristics
-	for (const heuristic of REDOS_PATTERNS) {
-		if (heuristic.test(pattern)) {
-			return null;
-		}
-	}
-
-	let regex: RegExp;
-	try {
-		regex = new RegExp(pattern, flags);
-	} catch (error) {
-		return null;
-	}
-
-	// Test execution time with a worst-case string to detect catastrophic backtracking
-	const testString = 'a'.repeat(50);
-	const startTime = Date.now();
-	try {
-		regex.test(testString);
-		const elapsed = Date.now() - startTime;
-		if (elapsed > REGEX_TIMEOUT_MS) {
-			return null;
-		}
-	} catch (error) {
-		return null;
-	}
-
-	return regex;
-}
+import { createSafeRegex } from './search';
 
 describe('ReDoS Protection', () => {
 	describe('Alternation-based ReDoS patterns', () => {
@@ -147,9 +107,9 @@ describe('ReDoS Protection', () => {
 			const startTime = Date.now();
 			const result = createSafeRegex('test.*pattern', 'gi');
 			const elapsed = Date.now() - startTime;
-			
+
 			expect(result).not.toBeNull();
-			expect(elapsed).toBeLessThan(REGEX_TIMEOUT_MS);
+			expect(elapsed).toBeLessThan(100);
 		});
 	});
 });

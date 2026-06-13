@@ -19,7 +19,7 @@ const REDOS_PATTERNS = [
 // Maximum execution time for regex test (milliseconds)
 const REGEX_TIMEOUT_MS = 100;
 
-function createSafeRegex(pattern: string, flags: string): RegExp | null {
+export function createSafeRegex(pattern: string, flags: string): RegExp | null {
 	// Check against ReDoS heuristics
 	for (const heuristic of REDOS_PATTERNS) {
 		if (heuristic.test(pattern)) {

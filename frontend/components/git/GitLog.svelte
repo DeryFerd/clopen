@@ -10,9 +10,11 @@
 		activeHash?: string | null;
 		onLoadMore: () => void;
 		onViewCommit: (hash: string) => void;
+		onCheckoutCommit: (hash: string) => void;
+		getRemoteCommitUrl?: (hash: string) => string | null;
 	}
 
-	const { commits, isLoading, hasMore, activeHash = null, onLoadMore, onViewCommit }: Props = $props();
+	const { commits, isLoading, hasMore, activeHash = null, onLoadMore, onViewCommit, onCheckoutCommit, getRemoteCommitUrl }: Props = $props();
 
 	let selectedHash = $state('');
 	const effectiveActiveHash = $derived(activeHash ?? selectedHash);
@@ -210,6 +212,15 @@
 		return ref.substring(0, MAX_REF_LENGTH - 1) + '\u2026';
 	}
 
+	function formatRefs(refs: string[]): string {
+		const visible = refs.slice(0, MAX_VISIBLE_REFS).map(truncateRef);
+		if (refs.length <= MAX_VISIBLE_REFS) {
+			return visible.join('  ·  ');
+		}
+
+		return `${visible.join('  ·  ')}  ·  +${refs.length - MAX_VISIBLE_REFS}`;
+	}
+
 	function formatDate(dateStr: string): string {
 		const date = new Date(dateStr);
 		const now = new Date();
@@ -229,6 +240,11 @@
 		onViewCommit(hash);
 	}
 
+	function handleCheckoutCommit(hash: string, e: MouseEvent) {
+		e.stopPropagation();
+		onCheckoutCommit(hash);
+	}
+
 	async function copyCommitHash(hash: string, e: MouseEvent) {
 		e.stopPropagation();
 		try {
@@ -237,6 +253,17 @@
 		} catch {
 			addNotification({ type: 'error', title: 'Failed', message: 'Could not copy to clipboard', duration: 3000 });
 		}
+	}
+
+	function openCommitOnRemote(hash: string, e: MouseEvent) {
+		e.stopPropagation();
+		const remoteUrl = getRemoteCommitUrl?.(hash) ?? null;
+		if (!remoteUrl) {
+			addNotification({ type: 'error', title: 'No Remote URL', message: 'Could not build a remote commit URL', duration: 3000 });
+			return;
+		}
+
+		window.open(remoteUrl, '_blank', 'noopener,noreferrer');
 	}
 </script>
 
@@ -256,7 +283,7 @@
 				{@const graph = graphRows[idx]}
 				{@const graphWidth = (graph ? graph.maxCol + 1 : 1) * LANE_WIDTH + GRAPH_PAD * 2}
 				<div
-					class="group flex items-stretch w-full text-left cursor-pointer transition-colors
+					class="group relative flex items-stretch w-full text-left cursor-pointer transition-colors
 						{effectiveActiveHash === commit.hash
 							? 'bg-violet-500/10 dark:bg-violet-500/15 text-slate-900 dark:text-slate-100'
 							: 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}"
@@ -343,17 +370,17 @@
 					{/if}
 
 					<!-- Commit info (3-line layout) -->
-					<div class="flex-1 min-w-0 px-1.5 py-0.5 flex flex-col justify-center overflow-hidden">
+					<div class="flex-1 min-w-0 px-1.5 py-0.5 pr-2 group-hover:pr-10 group-focus-within:pr-10 flex flex-col justify-center overflow-hidden transition-[padding] duration-150">
 						<!-- Line 1: Message + Date -->
-						<div class="flex items-center gap-2">
+						<div class="flex min-w-0 items-center gap-2">
 							<p class="flex-1 min-w-0 text-sm text-slate-900 dark:text-slate-100 leading-tight truncate" title={commit.message}>
 								{commit.message}
 							</p>
-							<span class="text-3xs text-slate-400 shrink-0">{formatDate(commit.date)}</span>
+							<span class="text-3xs text-slate-400 shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">{formatDate(commit.date)}</span>
 						</div>
 
 						<!-- Line 2: Hash + Author -->
-						<div class="flex items-center gap-1.5 mt-px">
+						<div class="flex min-w-0 items-center gap-1.5 mt-px">
 							<button
 								type="button"
 								class="text-xs font-mono text-violet-600 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-300 bg-transparent border-none cursor-pointer p-0 shrink-0 transition-colors"
@@ -362,30 +389,41 @@
 							>
 								{commit.hashShort}
 							</button>
-							<span class="text-xs text-slate-500 truncate">{commit.author}</span>
+							<span class="flex-1 min-w-0 text-xs text-slate-500 truncate">{commit.author}</span>
 						</div>
 
 						<!-- Line 3: Refs -->
 						{#if commit.refs && commit.refs.length > 0}
-							<div class="flex items-center gap-1 mt-px overflow-hidden">
-								{#each commit.refs.slice(0, MAX_VISIBLE_REFS) as ref}
-									<span
-										class="text-3xs px-1 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0 truncate max-w-28"
-										title={ref}
-									>
-										{truncateRef(ref)}
-									</span>
-								{/each}
-								{#if commit.refs.length > MAX_VISIBLE_REFS}
-									<span
-										class="text-3xs px-1 py-px rounded bg-slate-500/10 text-slate-500 shrink-0 cursor-default"
-										title={commit.refs.slice(MAX_VISIBLE_REFS).join(', ')}
-									>
-										+{commit.refs.length - MAX_VISIBLE_REFS}
-									</span>
-								{/if}
+							<div class="min-w-0 mt-px max-w-[80%] overflow-hidden">
+								<span
+									class="block min-w-0 truncate text-3xs text-blue-600 dark:text-blue-400"
+									title={commit.refs.join(', ')}
+								>
+									{formatRefs(commit.refs)}
+								</span>
 							</div>
 						{/if}
+					</div>
+					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-1 pr-2 bg-white/20 opacity-0 backdrop-blur-md supports-[backdrop-filter]:bg-white/10 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-slate-900/20 dark:supports-[backdrop-filter]:bg-slate-900/10">
+						<button
+							type="button"
+							class="pointer-events-auto flex items-center justify-center w-6 h-6 rounded-md text-slate-500 transition-all hover:bg-violet-500/10 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400"
+							onclick={(e) => handleCheckoutCommit(commit.hash, e)}
+							title={`Checkout commit ${commit.hashShort}`}
+							aria-label={`Checkout commit ${commit.hashShort}`}
+						>
+							<Icon name="lucide:arrow-right-to-line" class="w-3.5 h-3.5" />
+						</button>
+						<button
+							type="button"
+							class="pointer-events-auto flex items-center justify-center w-6 h-6 rounded-md text-slate-500 transition-all hover:bg-violet-500/10 hover:text-violet-600 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-violet-400"
+							onclick={(e) => openCommitOnRemote(commit.hash, e)}
+							disabled={!getRemoteCommitUrl?.(commit.hash)}
+							title={`Open commit ${commit.hashShort} on remote`}
+							aria-label={`Open commit ${commit.hashShort} on remote`}
+						>
+							<Icon name="lucide:globe" class="w-3.5 h-3.5" />
+						</button>
 					</div>
 				</div>
 			{/each}

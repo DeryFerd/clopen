@@ -901,9 +901,71 @@
 			await ws.http('git:switch-branch', { projectId, name });
 			showBranchManager = false;
 			await loadAll();
+			if (activeView === 'log') await loadLog(true);
 		} catch (err) {
 			debug.error('git', 'Failed to switch branch:', err);
 			showError('Switch Branch Failed', err instanceof Error ? err.message : 'Unknown error');
+		}
+	}
+
+	function checkoutCommit(hash: string) {
+		const commit = commits.find(item => item.hash === hash);
+		const shortHash = commit?.hashShort ?? hash.slice(0, 7);
+		requestConfirm({
+			title: 'Checkout Commit',
+			message: `Checkout commit ${shortHash}? This will detach HEAD. Create or switch to a branch before committing new work.`,
+			type: 'warning',
+			confirmText: 'Checkout',
+			onConfirm: async () => {
+				if (!projectId) return;
+				try {
+					await ws.http('git:checkout-commit', { projectId, commitHash: hash });
+					selectedCommit = null;
+					openTabs = [];
+					activeTabId = null;
+					await loadAll();
+					if (activeView === 'log') await loadLog(true);
+					showInfo('Commit Checked Out', `Checked out ${shortHash}. HEAD is now detached.`);
+				} catch (err) {
+					debug.error('git', 'Failed to checkout commit:', err);
+					showError('Checkout Failed', err instanceof Error ? err.message : 'Unknown error');
+				}
+			}
+		});
+	}
+
+	function getPreferredRemoteUrl(): string | null {
+		if (remotes.length === 0) return null;
+		return remotes.find(remote => remote.name === selectedRemote)?.fetchUrl
+			|| remotes.find(remote => remote.name === selectedRemote)?.pushUrl
+			|| remotes[0]?.fetchUrl
+			|| remotes[0]?.pushUrl
+			|| null;
+	}
+
+	function buildRemoteCommitUrl(hash: string): string | null {
+		const remoteUrl = getPreferredRemoteUrl();
+		if (!remoteUrl) return null;
+
+		let normalized = remoteUrl.trim();
+
+		if (normalized.startsWith('git@')) {
+			normalized = normalized.replace(/^git@([^:]+):/, 'https://$1/');
+		} else if (normalized.startsWith('ssh://git@')) {
+			normalized = normalized.replace(/^ssh:\/\/git@/, 'https://');
+		} else if (normalized.startsWith('ssh://')) {
+			normalized = normalized.replace(/^ssh:\/\//, 'https://');
+		}
+
+		normalized = normalized.replace(/\.git$/, '').replace(/\/+$/, '');
+
+		try {
+			const url = new URL(normalized);
+			const basePath = url.pathname.replace(/\/+$/, '');
+			const commitSegment = url.hostname.includes('bitbucket') ? 'commits' : 'commit';
+			return `${url.protocol}//${url.host}${basePath}/${commitSegment}/${hash}`;
+		} catch {
+			return null;
 		}
 	}
 
@@ -2045,6 +2107,8 @@ ${bodies}`;
 				activeHash={activeTab?.commitHash ?? null}
 				onLoadMore={() => loadLog()}
 				onViewCommit={viewCommitDiff}
+				onCheckoutCommit={checkoutCommit}
+				getRemoteCommitUrl={buildRemoteCommitUrl}
 			/>
 		{/if}
 	{:else if activeView === 'stash'}

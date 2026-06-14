@@ -10,6 +10,27 @@ async function readdir(path: string): Promise<string[]> {
 	return entries.map(e => e.name);
 }
 
+async function statIfExists(path: string): Promise<Awaited<ReturnType<ReturnType<typeof Bun.file>['stat']>> | null> {
+	try {
+		return await Bun.file(path).stat();
+	} catch {
+		return null;
+	}
+}
+
+// Returns true when every visible entry is a .app bundle or the "Applications" alias —
+// the signature of a DMG/installer mount, not a general-purpose volume.
+async function isLikelyMacAppVolume(volumePath: string): Promise<boolean> {
+	try {
+		const entries = await readdir(volumePath);
+		const visible = entries.filter(e => !e.startsWith('.'));
+		if (visible.length === 0) return false;
+		return visible.every(e => e.endsWith('.app') || e === 'Applications');
+	} catch {
+		return false;
+	}
+}
+
 // Return types
 export interface PathBrowseData {
 	name: string;
@@ -23,6 +44,7 @@ export interface PathBrowseData {
 		type: 'file' | 'directory';
 		path: string;
 		modified: string;
+		kind?: 'home' | 'root' | 'volume' | 'drive';
 		size?: number;
 		extension?: string;
 	}>;
@@ -50,6 +72,16 @@ export async function handlePathBrowsing(path: string): Promise<PathBrowseData> 
 	} else {
 		// Use the provided path
 		targetPath = path;
+	}
+
+	// Windows: a bare drive letter ("C:") is drive-relative — it points at the
+	// drive's *current* directory, not its root. Path normalization (resolve /
+	// realpath) and manual entry can both strip the trailing separator, which
+	// then makes join() produce drive-relative child paths like "C:Users" whose
+	// stat() fails, leaving the listing empty. Append the separator so we always
+	// browse the drive root.
+	if (/^[A-Za-z]:$/.test(targetPath)) {
+		targetPath += '\\';
 	}
 
 	// Check if path exists (use stat instead of exists for directories)
@@ -155,165 +187,138 @@ export async function handlePathBrowsing(path: string): Promise<PathBrowseData> 
 
 // Helper function to handle Unix mount points listing (Linux, macOS, etc.)
 export async function handleUnixMountPoints(): Promise<PathBrowseData> {
-	const commonMountPoints: Array<{
+	const items: Array<{
 		name: string;
 		type: 'file' | 'directory';
 		path: string;
 		modified: string;
-		size?: number;
-		extension?: string;
+		kind: 'home' | 'root' | 'volume';
 	}> = [];
 
-	// Always add root filesystem
-	const rootFile = Bun.file('/');
-	if (await rootFile.exists()) {
-		const stats = await rootFile.stat();
-		commonMountPoints.push({
-			name: 'Root (/) Filesystem',
-			type: 'directory',
-			path: '/',
-			modified: stats.mtime.toISOString()
-		});
-	}
-
-	// Add user home directory
+	// Home directory — all Unix platforms
 	const homeDir = process.env.HOME;
 	if (homeDir) {
-		const homeFile = Bun.file(homeDir);
-		if (await homeFile.exists()) {
-			const stats = await homeFile.stat();
-			commonMountPoints.push({
-				name: 'Home Directory',
-				type: 'directory',
-				path: homeDir,
-				modified: stats.mtime.toISOString()
-			});
+		const stats = await statIfExists(homeDir);
+		if (stats?.isDirectory()) {
+			items.push({ name: 'Home Directory', type: 'directory', path: homeDir, modified: stats.mtime.toISOString(), kind: 'home' });
 		}
 	}
 
-	// Common mount points to check
-	const potentialMounts = [
-		'/mnt',       // Linux mount point
-		'/media',     // Linux removable media
-		'/Volumes',   // macOS mount point
-		'/usr',       // Unix system directory
-		'/var',       // Unix variable directory
-		'/opt',       // Optional software
-		'/tmp'        // Temporary directory
-	];
-
-	for (const mountPath of potentialMounts) {
-		try {
-			const mountFile = Bun.file(mountPath);
-			if (await mountFile.exists()) {
-				const stats = await mountFile.stat();
-				if (stats.isDirectory()) {
-					let displayName = mountPath;
-
-					// Special names for common directories
-					switch (mountPath) {
-						case '/mnt':
-							displayName = 'Mount Points (/mnt)';
-							break;
-						case '/media':
-							displayName = 'Media (/media)';
-							break;
-						case '/Volumes':
-							displayName = 'Volumes (/Volumes)';
-							break;
-						case '/usr':
-							displayName = 'System (/usr)';
-							break;
-						case '/var':
-							displayName = 'Variable (/var)';
-							break;
-						case '/opt':
-							displayName = 'Optional (/opt)';
-							break;
-						case '/tmp':
-							displayName = 'Temporary (/tmp)';
-							break;
+	if (process.platform === 'darwin') {
+		// macOS: enumerate /Volumes/* — skip installer/DMG mounts
+		const volumesStats = await statIfExists('/Volumes');
+		if (volumesStats?.isDirectory()) {
+			try {
+				const volumeNames = await readdir('/Volumes');
+				for (const name of volumeNames) {
+					const vPath = `/Volumes/${name}`;
+					try {
+						const vStats = await statIfExists(vPath);
+						if (!vStats?.isDirectory()) continue;
+						if (await isLikelyMacAppVolume(vPath)) continue;
+						items.push({ name, type: 'directory', path: vPath, modified: vStats.mtime.toISOString(), kind: 'volume' });
+					} catch {
+						// Skip inaccessible volumes
 					}
-
-					commonMountPoints.push({
-						name: displayName,
-						type: 'directory',
-						path: mountPath,
-						modified: stats.mtime.toISOString()
-					});
 				}
+			} catch {
+				// Skip if /Volumes is unreadable
 			}
-		} catch {
-			// Skip inaccessible mount points
 		}
-	}
+	} else if (process.platform === 'linux') {
+		// Linux: root + /mnt/*, /media/*, /run/media/{user}/* (systemd automount)
+		const rootStats = await statIfExists('/');
+		if (rootStats?.isDirectory()) {
+			items.push({ name: 'Root (/) Filesystem', type: 'directory', path: '/', modified: rootStats.mtime.toISOString(), kind: 'root' });
+		}
 
-	// On macOS, try to get mounted volumes from /Volumes
-	const volumesFile = Bun.file('/Volumes');
-	if (process.platform === 'darwin' && await volumesFile.exists()) {
-		try {
-			const volumeItems = await readdir('/Volumes');
-			for (const volume of volumeItems) {
-				const volumePath = `/Volumes/${volume}`;
-				try {
-					const volumeFile = Bun.file(volumePath);
-					if (await volumeFile.exists()) {
-						const stats = await volumeFile.stat();
-						if (stats.isDirectory()) {
-							commonMountPoints.push({
-								name: `${volume} Volume`,
-								type: 'directory',
-								path: volumePath,
-								modified: stats.mtime.toISOString()
-							});
+		for (const base of ['/mnt', '/media']) {
+			const baseStats = await statIfExists(base);
+			if (!baseStats?.isDirectory()) continue;
+			try {
+				const entries = await readdir(base);
+				for (const entry of entries) {
+					const entryPath = `${base}/${entry}`;
+					try {
+						const entryStats = await statIfExists(entryPath);
+						if (entryStats?.isDirectory()) {
+							items.push({ name: entry, type: 'directory', path: entryPath, modified: entryStats.mtime.toISOString(), kind: 'volume' });
 						}
+					} catch {
+						// Skip inaccessible mounts
 					}
-				} catch {
-					// Skip inaccessible volumes
 				}
+			} catch {
+				// Skip if base is unreadable
 			}
-		} catch {
-			// Skip if can't read /Volumes
 		}
-	}
 
-	// On Linux, try to get mounted filesystems from /mnt and /media
-	if (process.platform === 'linux') {
-		for (const baseMount of ['/mnt', '/media']) {
-			const baseMountFile = Bun.file(baseMount);
-			if (await baseMountFile.exists()) {
-				try {
-					const mountItems = await readdir(baseMount);
-					for (const mount of mountItems) {
-						const mountPath = `${baseMount}/${mount}`;
-						try {
-							const mountFile = Bun.file(mountPath);
-							if (await mountFile.exists()) {
-								const stats = await mountFile.stat();
-								if (stats.isDirectory()) {
-									commonMountPoints.push({
-										name: `${mount} (${baseMount})`,
-										type: 'directory',
-										path: mountPath,
-										modified: stats.mtime.toISOString()
-									});
+		// systemd automount: /run/media/{user}/{volume}
+		const runMediaStats = await statIfExists('/run/media');
+		if (runMediaStats?.isDirectory()) {
+			try {
+				const users = await readdir('/run/media');
+				for (const user of users) {
+					const userPath = `/run/media/${user}`;
+					try {
+						const userStats = await statIfExists(userPath);
+						if (!userStats?.isDirectory()) continue;
+						const volumes = await readdir(userPath);
+						for (const vol of volumes) {
+							const volPath = `${userPath}/${vol}`;
+							try {
+								const volStats = await statIfExists(volPath);
+								if (volStats?.isDirectory()) {
+									items.push({ name: vol, type: 'directory', path: volPath, modified: volStats.mtime.toISOString(), kind: 'volume' });
 								}
+							} catch {
+								// Skip inaccessible
 							}
-						} catch {
-							// Skip inaccessible mounts
 						}
+					} catch {
+						// Skip inaccessible user dir
 					}
-				} catch {
-					// Skip if can't read mount directory
 				}
+			} catch {
+				// Skip if /run/media is unreadable
+			}
+		}
+	} else {
+		// Other Unix (FreeBSD, OpenBSD, etc.): root + /mnt and /media subdirectories
+		const rootStats = await statIfExists('/');
+		if (rootStats?.isDirectory()) {
+			items.push({ name: 'Root (/) Filesystem', type: 'directory', path: '/', modified: rootStats.mtime.toISOString(), kind: 'root' });
+		}
+
+		for (const base of ['/mnt', '/media']) {
+			const baseStats = await statIfExists(base);
+			if (!baseStats?.isDirectory()) continue;
+			try {
+				const entries = await readdir(base);
+				for (const entry of entries) {
+					const entryPath = `${base}/${entry}`;
+					try {
+						const entryStats = await statIfExists(entryPath);
+						if (entryStats?.isDirectory()) {
+							items.push({ name: entry, type: 'directory', path: entryPath, modified: entryStats.mtime.toISOString(), kind: 'volume' });
+						}
+					} catch {
+						// Skip inaccessible
+					}
+				}
+			} catch {
+				// Skip if base is unreadable
 			}
 		}
 	}
 
-	// Remove duplicates based on path
-	const uniqueMounts = commonMountPoints.filter((mount, index, self) =>
-		index === self.findIndex(m => m.path === mount.path)
-	);
+	// Deduplicate by path
+	const seen = new Set<string>();
+	const uniqueMounts = items.filter(item => {
+		if (seen.has(item.path)) return false;
+		seen.add(item.path);
+		return true;
+	});
 
 	return {
 		name: 'System',
@@ -335,6 +340,7 @@ export async function handleWindowsDrives(): Promise<PathBrowseData> {
 		type: 'file' | 'directory';
 		path: string;
 		modified: string;
+		kind: 'drive';
 		size?: number;
 		extension?: string;
 	}> = [];
@@ -358,7 +364,8 @@ export async function handleWindowsDrives(): Promise<PathBrowseData> {
 			name: `${drive} Drive`,
 			type: 'directory',
 			path: drivePath,
-			modified: new Date().toISOString() // Use current time for drives
+			modified: new Date().toISOString(),
+			kind: 'drive'
 		});
 	}
 
@@ -372,7 +379,8 @@ export async function handleWindowsDrives(): Promise<PathBrowseData> {
 						name: `${drive} Drive`,
 						type: 'directory',
 						path: drivePath,
-						modified: new Date().toISOString()
+						modified: new Date().toISOString(),
+						kind: 'drive'
 					});
 				}
 			} catch {

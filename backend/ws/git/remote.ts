@@ -115,6 +115,49 @@ export const remoteHandler = createRouter()
 		return { ok: true };
 	})
 
+	.http('git:set-remote-url', {
+		data: t.Object({
+			projectId: t.String(),
+			name: t.String(),
+			url: t.String()
+		}),
+		response: t.Object({ ok: t.Boolean() })
+	}, async ({ data, conn }) => {
+		const project = requireProjectAccess(conn, data.projectId);
+		await gitService.setRemoteUrl(project.path, data.name, data.url);
+		return { ok: true };
+	})
+
+	.http('git:rename-remote', {
+		data: t.Object({
+			projectId: t.String(),
+			oldName: t.String(),
+			newName: t.String()
+		}),
+		response: t.Object({ ok: t.Boolean() })
+	}, async ({ data, conn }) => {
+		const project = requireProjectAccess(conn, data.projectId);
+		await gitService.renameRemote(project.path, data.oldName, data.newName);
+		return { ok: true };
+	})
+
+	.http('git:edit-remote', {
+		data: t.Object({
+			projectId: t.String(),
+			oldName: t.String(),
+			newName: t.String(),
+			newUrl: t.String()
+		}),
+		response: t.Object({ ok: t.Boolean() })
+	}, async ({ data, conn }) => {
+		const project = requireProjectAccess(conn, data.projectId);
+		if (data.oldName !== data.newName) {
+			await gitService.renameRemote(project.path, data.oldName, data.newName);
+		}
+		await gitService.setRemoteUrl(project.path, data.newName, data.newUrl);
+		return { ok: true };
+	})
+
 	.http('git:remove-remote', {
 		data: t.Object({
 			projectId: t.String(),
@@ -124,6 +167,19 @@ export const remoteHandler = createRouter()
 	}, async ({ data, conn }) => {
 		const project = requireProjectAccess(conn, data.projectId);
 		await gitService.removeRemote(project.path, data.name);
+		return { ok: true };
+	})
+
+	.http('git:delete-remote-branch', {
+		data: t.Object({
+			projectId: t.String(),
+			remote: t.String(),
+			branch: t.String()
+		}),
+		response: t.Object({ ok: t.Boolean() })
+	}, async ({ data, conn }) => {
+		const project = requireProjectAccess(conn, data.projectId);
+		await gitService.deleteRemoteBranch(project.path, data.remote, data.branch);
 		return { ok: true };
 	})
 
@@ -178,6 +234,35 @@ export const remoteHandler = createRouter()
 		const project = requireProjectAccess(conn, data.projectId);
 		await gitService.stashDrop(project.path, data.index);
 		return { ok: true };
+	})
+
+	.http('git:stash-diff', {
+		data: t.Object({
+			projectId: t.String(),
+			index: t.Optional(t.Number())
+		}),
+		response: t.Array(t.Object({
+			oldPath: t.String(),
+			newPath: t.String(),
+			status: t.String(),
+			hunks: t.Array(t.Object({
+				oldStart: t.Number(),
+				oldLines: t.Number(),
+				newStart: t.Number(),
+				newLines: t.Number(),
+				header: t.String(),
+				lines: t.Array(t.Object({
+					type: t.Union([t.Literal('add'), t.Literal('delete'), t.Literal('context'), t.Literal('header')]),
+					content: t.String(),
+					oldLineNumber: t.Optional(t.Number()),
+					newLineNumber: t.Optional(t.Number())
+				}))
+			})),
+			isBinary: t.Boolean()
+		}))
+	}, async ({ data, conn }) => {
+		const project = requireProjectAccess(conn, data.projectId);
+		return await gitService.stashDiff(project.path, data.index);
 	})
 
 	.http('git:tags', {

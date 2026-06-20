@@ -233,14 +233,23 @@ export class GitService {
 	// Branches
 	// ============================================
 
-	async getBranches(cwd: string): Promise<GitBranchInfo> {
+	async getBranches(cwd: string, selectedRemote?: string): Promise<GitBranchInfo> {
+		// `git for-each-ref` lets us pull the committer date alongside the
+		// short hash and subject in a single call per ref namespace, which
+		// the old `git branch -v` output doesn't expose. Format:
+		//   `HEAD|short-name|short-hash|subject|iso-date`
+		// where `HEAD` is `*` for the current branch and ` ` for others.
+		// `iso-date` is strict ISO 8601 so it can't collide with the `|`
+		// separators — the parser uses `lastIndexOf('|')` to extract it.
+		const localFmt = '%(HEAD)|%(refname:short)|%(objectname:short)|%(subject)|%(committerdate:iso8601)';
+		const remoteFmt = '%(refname:short)|%(objectname:short)|%(subject)|%(committerdate:iso8601)';
 		const [localResult, remoteResult, headRef] = await Promise.all([
-			execGit(['branch', '-v', '--no-color'], cwd),
-			execGit(['branch', '-r', '-v', '--no-color'], cwd),
+			execGit(['for-each-ref', `--format=${localFmt}`, 'refs/heads/'], cwd),
+			execGit(['for-each-ref', `--format=${remoteFmt}`, 'refs/remotes/'], cwd),
 			execGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
 		]);
 
-		// Handle empty repo (no commits yet) — branch command returns empty
+		// Handle empty repo (no commits yet) — for-each-ref returns empty
 		if (!localResult.stdout.trim()) {
 			// Try to get the initial branch name from HEAD
 			const headResult = await execGit(['symbolic-ref', '--short', 'HEAD'], cwd);
@@ -269,11 +278,12 @@ export class GitService {
 		branchInfo.current = headName;
 		for (const b of branchInfo.local) b.isCurrent = b.name === headName;
 
-		// Get ahead/behind for current branch
-		if (branchInfo.current) {
+		// Get ahead/behind for current branch relative to the SELECTED remote
+		if (branchInfo.current && selectedRemote) {
 			try {
+				const remoteRef = `${selectedRemote}/${branchInfo.current}`;
 				const abResult = await execGit(
-					['rev-list', '--left-right', '--count', `${branchInfo.current}...@{upstream}`],
+					['rev-list', '--left-right', '--count', `${branchInfo.current}...${remoteRef}`],
 					cwd
 				);
 				if (abResult.exitCode === 0) {
@@ -281,7 +291,6 @@ export class GitService {
 					branchInfo.ahead = ahead;
 					branchInfo.behind = behind;
 
-					// Update the current branch entry too
 					const currentBranch = branchInfo.local.find(b => b.isCurrent);
 					if (currentBranch) {
 						currentBranch.ahead = ahead;
@@ -289,7 +298,7 @@ export class GitService {
 					}
 				}
 			} catch {
-				// No upstream configured
+				// Remote tracking branch doesn't exist — show 0
 			}
 		}
 
@@ -340,6 +349,15 @@ export class GitService {
 		const result = await execGit(['branch', '-m', oldName, newName], cwd);
 		if (result.exitCode !== 0) {
 			throw new Error(`git branch -m failed: ${result.stderr}`);
+		}
+	}
+
+	async deleteRemoteBranch(cwd: string, remote: string, branch: string): Promise<void> {
+		assertSafeGitRevish(remote, 'remote name');
+		assertSafeGitRevish(branch, 'branch name');
+		const result = await execGit(['push', remote, '--delete', branch], cwd);
+		if (result.exitCode !== 0) {
+			throw new Error(`git push --delete failed: ${result.stderr}`);
 		}
 	}
 
@@ -497,6 +515,25 @@ export class GitService {
 		}
 	}
 
+	async setRemoteUrl(cwd: string, name: string, url: string): Promise<void> {
+		assertSafeGitRemoteName(name);
+		assertSafeGitRemoteUrl(url);
+		const result = await execGit(['remote', 'set-url', name, url], cwd);
+		if (result.exitCode !== 0) {
+			throw new Error(`git remote set-url failed: ${result.stderr}`);
+		}
+	}
+
+	async renameRemote(cwd: string, oldName: string, newName: string): Promise<void> {
+		assertSafeGitRemoteName(oldName);
+		assertSafeGitRemoteName(newName);
+		if (oldName === newName) return;
+		const result = await execGit(['remote', 'rename', oldName, newName], cwd);
+		if (result.exitCode !== 0) {
+			throw new Error(`git remote rename failed: ${result.stderr}`);
+		}
+	}
+
 	async removeRemote(cwd: string, name: string): Promise<void> {
 		assertSafeGitRemoteName(name);
 		const result = await execGit(['remote', 'remove', name], cwd);
@@ -510,7 +547,11 @@ export class GitService {
 	// ============================================
 
 	async stashList(cwd: string): Promise<GitStashEntry[]> {
-		const result = await execGit(['stash', 'list'], cwd);
+		// Custom format appends the committer date (ISO 8601) after a ` | `
+		// separator so the parser can extract it. The default `git stash list`
+		// output has no date. `%cI` is the strict ISO format — it contains
+		// colons and dashes but never ` | `, so the lastIndexOf split is safe.
+		const result = await execGit(['stash', 'list', '--format=%gd: %gs | %cI'], cwd);
 		return parseStashList(result.stdout);
 	}
 
@@ -556,6 +597,19 @@ export class GitService {
 		if (result.exitCode !== 0) {
 			throw new Error(`git stash drop failed: ${result.stderr}`);
 		}
+	}
+
+	async stashDiff(cwd: string, index = 0): Promise<GitFileDiff[]> {
+		if (!Number.isInteger(index) || index < 0) {
+			throw new Error('Invalid stash index');
+		}
+		// `git stash show -p stash@{N}` produces a unified diff in the
+		// same format as `git diff`, so `parseDiff` handles it unchanged.
+		const result = await execGit(['stash', 'show', '-p', `stash@{${index}}`], cwd);
+		if (result.exitCode !== 0) {
+			throw new Error(`git stash show failed: ${result.stderr}`);
+		}
+		return parseDiff(result.stdout);
 	}
 
 	// ============================================
@@ -756,6 +810,21 @@ export class GitService {
 		return {
 			success: result.exitCode === 0,
 			message: result.exitCode === 0 ? (result.stdout || result.stderr) : result.stderr
+		};
+	}
+
+	/** Cherry-pick one or more commits onto the current branch (`git cherry-pick <hash>...`). */
+	async cherryPick(cwd: string, refs: string[]): Promise<{ success: boolean; message: string }> {
+		if (refs.length === 0) {
+			return { success: false, message: 'No commits provided' };
+		}
+		for (const ref of refs) {
+			assertSafeGitRevish(ref, 'cherry-pick ref');
+		}
+		const result = await execGit(['cherry-pick', ...refs], cwd);
+		return {
+			success: result.exitCode === 0,
+			message: result.exitCode === 0 ? (result.stdout || result.stderr || 'Cherry-pick succeeded') : result.stderr
 		};
 	}
 

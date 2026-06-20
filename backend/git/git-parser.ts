@@ -101,7 +101,16 @@ export function parseStatus(output: string): GitStatus {
 }
 
 /**
- * Parse `git branch -a -v --format` output
+ * Parse `git for-each-ref` output for branches into structured info.
+ *
+ * Expects lines in the custom format produced by `gitService.getBranches`:
+ *   - local:  `*|main|abc1234|commit subject|2024-01-15T10:30:00+07:00`
+ *              ` |dev |abc1234|another subject|2024-01-14T09:00:00+07:00`
+ *   - remote: `origin/main|abc1234|commit subject|2024-01-15T10:30:00+07:00`
+ *
+ * The date is strict ISO 8601 and never contains `|`, so `lastIndexOf('|')`
+ * safely extracts it. The subject (which may itself contain `|`) is kept
+ * whole by limiting the head split to 4 / 3 parts.
  */
 export function parseBranches(localOutput: string, remoteOutput: string): GitBranchInfo {
 	const local: GitBranch[] = [];
@@ -111,23 +120,18 @@ export function parseBranches(localOutput: string, remoteOutput: string): GitBra
 	// Parse local branches
 	const localLines = localOutput.split('\n').filter(Boolean);
 	for (const line of localLines) {
-		// Format: "* main abc1234 commit message" or "  dev abc1234 commit message"
-		const isCurrent = line.startsWith('*');
-		const trimmed = line.replace(/^\*?\s+/, '');
+		const dateSep = line.lastIndexOf('|');
+		if (dateSep === -1) continue;
+		const lastCommitDate = line.substring(dateSep + 1);
+		const head = line.substring(0, dateSep);
 
-		// When HEAD is detached, git emits a parenthesized pseudo-ref instead of a
-		// branch name, e.g. "* (no branch, rebasing main)" or "* (HEAD detached at
-		// abc1234)". These are not real branches — skip them so they never leak into
-		// the branch list or get treated as the current branch (which produced the
-		// bogus "(no" branch name). Match git's exact pseudo-ref prefixes so legit
-		// branch names containing parentheses (e.g. "feature(x)") are preserved. The
-		// real current branch / detached state is resolved authoritatively in
-		// git-service. Output is forced to en_US locale, so these strings are stable.
-		if (isCurrent && /^\((?:HEAD detached|no branch)\b/.test(trimmed)) continue;
-
-		const parts = trimmed.split(/\s+/);
-		const name = parts[0];
-		const lastCommit = parts[1] || '';
+		// head = "<*>|<name>|<hash>|<subject>"
+		const parts = head.split('|', 4);
+		if (parts.length < 4) continue;
+		const isCurrent = parts[0] === '*';
+		const name = parts[1];
+		const lastCommit = parts[2];
+		const lastCommitMessage = parts[3];
 
 		if (isCurrent) current = name;
 
@@ -137,18 +141,30 @@ export function parseBranches(localOutput: string, remoteOutput: string): GitBra
 			isRemote: false,
 			ahead: 0,
 			behind: 0,
-			lastCommit
-		});
+			lastCommit,
+			lastCommitMessage,
+			lastCommitDate
+		} as GitBranch);
 	}
 
 	// Parse remote branches
 	const remoteLines = remoteOutput.split('\n').filter(Boolean);
 	for (const line of remoteLines) {
-		const trimmed = line.trim();
-		if (trimmed.includes('->')) continue; // Skip HEAD pointers
-		const parts = trimmed.split(/\s+/);
+		const dateSep = line.lastIndexOf('|');
+		if (dateSep === -1) continue;
+		const lastCommitDate = line.substring(dateSep + 1);
+		const head = line.substring(0, dateSep);
+
+		// head = "<name>|<hash>|<subject>"
+		const parts = head.split('|', 3);
+		if (parts.length < 3) continue;
 		const name = parts[0];
-		const lastCommit = parts[1] || '';
+		// Skip symbolic HEAD pointers like `origin/HEAD -> origin/main`
+		// (these only show up in the old `git branch -r` output, not in
+		// `for-each-ref refs/remotes/`, but guard anyway).
+		if (name.endsWith('/HEAD')) continue;
+		const lastCommit = parts[1];
+		const lastCommitMessage = parts[2];
 
 		remote.push({
 			name,
@@ -156,8 +172,10 @@ export function parseBranches(localOutput: string, remoteOutput: string): GitBra
 			isRemote: true,
 			ahead: 0,
 			behind: 0,
-			lastCommit
-		});
+			lastCommit,
+			lastCommitMessage,
+			lastCommitDate
+		} as GitBranch);
 	}
 
 	return { current, local, remote, ahead: 0, behind: 0 };
@@ -342,19 +360,30 @@ export function parseRemotes(output: string): GitRemote[] {
 }
 
 /**
- * Parse `git stash list` output
+ * Parse `git stash list` output.
+ *
+ * Expects lines in the custom format produced by `git stash list --format="%gd: %gs | %cI"`:
+ *   `stash@{0}: WIP on main: abc1234 message | 2024-01-15T10:30:00+07:00`
+ *
+ * The ` | ` separator is safe because `%cI` (strict ISO 8601) never contains it.
+ * Falls back to the plain format (`stash@{N}: message`) when the separator is
+ * missing — e.g. older snapshots or a git version that ignores `--format`.
  */
 export function parseStashList(output: string): GitStashEntry[] {
 	const entries: GitStashEntry[] = [];
 	const lines = output.split('\n').filter(Boolean);
 
 	for (const line of lines) {
-		const match = line.match(/^stash@\{(\d+)\}:\s*(.+)$/);
+		const sepIdx = line.lastIndexOf(' | ');
+		const head = sepIdx === -1 ? line : line.substring(0, sepIdx);
+		const date = sepIdx === -1 ? '' : line.substring(sepIdx + 3);
+
+		const match = head.match(/^stash@\{(\d+)\}:\s*(.+)$/);
 		if (match) {
 			entries.push({
 				index: parseInt(match[1]),
 				message: match[2],
-				date: ''
+				date
 			});
 		}
 	}

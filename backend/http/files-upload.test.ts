@@ -76,7 +76,12 @@ beforeAll(async () => {
 		token_hash: hashToken(testToken),
 		expires_at: expiresAt,
 		created_at: new Date().toISOString(),
-		last_active_at: new Date().toISOString()
+		last_active_at: new Date().toISOString(),
+		user_agent: null,
+		ip_address: null,
+		device_name: null,
+		last_user_agent: null,
+		last_ip_address: null
 	});
 
 	// Create test project

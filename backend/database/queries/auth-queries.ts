@@ -18,6 +18,11 @@ export interface DBAuthSession {
 	expires_at: string;
 	created_at: string;
 	last_active_at: string;
+	user_agent?: string | null;
+	ip_address?: string | null;
+	device_name?: string | null;
+	last_user_agent?: string | null;
+	last_ip_address?: string | null;
 }
 
 export interface DBInviteToken {

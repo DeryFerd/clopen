@@ -11,6 +11,10 @@ import { getDbClientPrincipal, requireDbClientConnectionAccess } from './access'
 import { debug } from '$shared/utils/logger';
 
 const HISTORY_KEEP_PER_CONNECTION = 200;
+const PRUNE_EVERY_N_QUERIES = 10;
+
+// Track insert count per connection for deterministic pruning
+const insertCounters = new Map<string, number>();
 
 function recordHistory(input: {
 	connectionId: string;
@@ -31,8 +35,14 @@ function recordHistory(input: {
 			status: input.status,
 			error: input.error
 		});
-		if (Math.random() < 0.05) {
+
+		// Deterministic pruning: prune after every N inserts
+		const count = (insertCounters.get(input.connectionId) ?? 0) + 1;
+		insertCounters.set(input.connectionId, count);
+
+		if (count >= PRUNE_EVERY_N_QUERIES) {
 			dbClientQueryHistoryQueries.prune(input.connectionId, HISTORY_KEEP_PER_CONNECTION);
+			insertCounters.set(input.connectionId, 0);
 		}
 	} catch (err) {
 		// history must never break query execution

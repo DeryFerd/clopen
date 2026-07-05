@@ -5,41 +5,41 @@
 	let error = $state('');
 	let isLoading = $state(false);
 
-	// Rate limit countdown
-	let lockoutSeconds = $state(0);
-	let countdownInterval: ReturnType<typeof setInterval> | null = null;
+	// Server-controlled lockout based on timestamp
+	let serverLockedUntil = $state(0);
+	let clientTime = $state(Date.now());
+	let syncInterval: ReturnType<typeof setInterval> | null = null;
 
-	function parseRateLimitSeconds(message: string): number {
-		const match = message.match(/Try again in (\d+) seconds/);
-		return match ? parseInt(match[1], 10) : 0;
-	}
-
-	function startCountdown(seconds: number) {
-		stopCountdown();
-		lockoutSeconds = seconds;
-		countdownInterval = setInterval(() => {
-			lockoutSeconds -= 1;
-			if (lockoutSeconds <= 0) {
-				stopCountdown();
+	// Start client time sync when locked out
+	function startTimerSync() {
+		if (syncInterval) return;
+		syncInterval = setInterval(() => {
+			clientTime = Date.now();
+			if (clientTime >= serverLockedUntil) {
+				stopTimerSync();
 				error = '';
 			}
-		}, 1000);
+		}, 100); // Update every 100ms for smoother countdown
 	}
 
-	function stopCountdown() {
-		lockoutSeconds = 0;
-		if (countdownInterval) {
-			clearInterval(countdownInterval);
-			countdownInterval = null;
+	function stopTimerSync() {
+		if (syncInterval) {
+			clearInterval(syncInterval);
+			syncInterval = null;
 		}
+		serverLockedUntil = 0;
 	}
 
-	const isLockedOut = $derived(lockoutSeconds > 0);
+	// Derived lockout state based on server timestamp
+	const isLockedOut = $derived(clientTime < serverLockedUntil);
+	const remainingSeconds = $derived(
+		isLockedOut ? Math.ceil((serverLockedUntil - clientTime) / 1000) : 0
+	);
 
-	// Build display error — replace server seconds with live countdown
+	// Build display error with remaining time
 	const displayError = $derived(
 		isLockedOut
-			? `Too many failed attempts. Try again in ${lockoutSeconds} seconds.`
+			? `Too many failed attempts. Try again in ${remainingSeconds} seconds.`
 			: error
 	);
 
@@ -61,13 +61,18 @@
 
 		try {
 			await authStore.login(trimmed);
+			// Success - clear any lockout
+			stopTimerSync();
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Login failed';
 			error = message;
 
-			const seconds = parseRateLimitSeconds(message);
-			if (seconds > 0) {
-				startCountdown(seconds);
+			// Check if error has lockedUntil timestamp from server
+			const lockedUntil = (err as any)?.lockedUntil;
+			if (typeof lockedUntil === 'number' && lockedUntil > Date.now()) {
+				serverLockedUntil = lockedUntil;
+				clientTime = Date.now();
+				startTimerSync();
 			}
 		} finally {
 			isLoading = false;

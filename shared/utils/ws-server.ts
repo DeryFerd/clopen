@@ -558,8 +558,13 @@ export class WSRouter<
 		} catch (err) {
 			// Catch ANY error and send wrapped in { success: false, error, requestId }
 			const errorMessage = err instanceof Error ? err.message : String(err);
+			
+			// Preserve additional error properties (like lockedUntil for rate limiting)
+			const errorResponse: any = { success: false, error: errorMessage, requestId };
+			if (err instanceof Error && 'lockedUntil' in err) {
+				errorResponse.lockedUntil = (err as any).lockedUntil;
+			}
 
-			const errorResponse = { success: false, error: errorMessage, requestId };
 			conn.send(JSON.stringify({ action: responseAction, payload: errorResponse }));
 			debug.error('websocket', `HTTP error [${action}]:`, errorMessage);
 		}

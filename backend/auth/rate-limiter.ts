@@ -52,9 +52,9 @@ class AuthRateLimiter {
 
 	/**
 	 * Check if an action is rate-limited for the given identifier.
-	 * Returns null if allowed, or an error message if blocked.
+	 * Returns null if allowed, or an error object with message and lockedUntil timestamp if blocked.
 	 */
-	check(identifier: string, action: string): string | null {
+	check(identifier: string, action: string): { message: string; lockedUntil: number } | null {
 		if (!RATE_LIMITED_ROUTES.has(action)) {
 			return null; // Not a rate-limited route
 		}
@@ -70,7 +70,10 @@ class AuthRateLimiter {
 		if (record.lockedUntil > now) {
 			const remainingSec = Math.ceil((record.lockedUntil - now) / 1000);
 			debug.warn('auth', `Rate limited: ${identifier} (${remainingSec}s remaining, ${record.failures} failures)`);
-			return `Too many failed attempts. Try again in ${remainingSec} seconds.`;
+			return {
+				message: `Too many failed attempts. Try again in ${remainingSec} seconds.`,
+				lockedUntil: record.lockedUntil
+			};
 		}
 
 		return null;

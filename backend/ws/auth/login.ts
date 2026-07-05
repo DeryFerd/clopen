@@ -156,7 +156,9 @@ export const loginHandler = createRouter()
 		if (isRateLimited) {
 			const rateLimitError = authRateLimiter.check(ip, 'auth:login');
 			if (rateLimitError) {
-				throw new Error(rateLimitError);
+				const error = new Error(rateLimitError.message) as Error & { lockedUntil?: number };
+				error.lockedUntil = rateLimitError.lockedUntil;
+				throw error;
 			}
 		}
 
@@ -188,6 +190,13 @@ export const loginHandler = createRouter()
 			if (isRateLimited) {
 				authRateLimiter.recordFailure(ip, 'auth:login');
 			}
+			
+			// Re-throw with lockedUntil if it exists
+			if (err instanceof Error && 'lockedUntil' in err) {
+				const extendedError = new Error(err.message) as Error & { lockedUntil?: number };
+				extendedError.lockedUntil = (err as any).lockedUntil;
+				throw extendedError;
+			}
 			throw err;
 		}
 	})
@@ -210,7 +219,9 @@ export const loginHandler = createRouter()
 		// Rate limit check
 		const rateLimitError = authRateLimiter.check(ip, 'auth:accept-invite');
 		if (rateLimitError) {
-			throw new Error(rateLimitError);
+			const error = new Error(rateLimitError.message) as Error & { lockedUntil?: number };
+			error.lockedUntil = rateLimitError.lockedUntil;
+			throw error;
 		}
 
 		try {

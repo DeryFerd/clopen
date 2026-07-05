@@ -265,7 +265,7 @@ export const loginHandler = createRouter()
 
 		const rateLimitError = authRateLimiter.check(ip, 'auth:validate-invite');
 		if (rateLimitError) {
-			return { valid: false, error: rateLimitError };
+			return { valid: false, error: rateLimitError.message };
 		}
 
 		const result = validateInviteToken(data.inviteToken);

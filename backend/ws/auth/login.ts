@@ -165,7 +165,7 @@ export const loginHandler = createRouter()
 
 			// Success — clear any rate limit record for this IP
 			if (isRateLimited) {
-				authRateLimiter.recordSuccess(ip);
+				authRateLimiter.recordSuccess(ip, 'auth:login');
 			}
 
 			auditLogQueries.logEvent({
@@ -216,7 +216,7 @@ export const loginHandler = createRouter()
 		try {
 			const result = createUserFromInvite(data.inviteToken, data.name);
 
-			authRateLimiter.recordSuccess(ip);
+			authRateLimiter.recordSuccess(ip, 'auth:accept-invite');
 
 			auditLogQueries.logEvent({
 				userId: result.user.id,
@@ -257,10 +257,19 @@ export const loginHandler = createRouter()
 			return { valid: false, error: rateLimitError };
 		}
 
+		// Count every attempt toward the volume cap (defends against probes
+		// that alternate valid and invalid tokens).
+		authRateLimiter.recordAttempt(ip, 'auth:validate-invite');
+
 		const result = validateInviteToken(data.inviteToken);
 
-		// Record failure if invalid token (probing)
-		if (!result.valid) {
+		// Record failure on invalid token (drives the failure-tier lockout
+		// for pure probes) and clear the whole per-route record on success
+		// (so a legit user who finally got the right token doesn't keep
+		// accumulated failure/attempt debt).
+		if (result.valid) {
+			authRateLimiter.recordSuccess(ip, 'auth:validate-invite');
+		} else {
 			authRateLimiter.recordFailure(ip, 'auth:validate-invite');
 		}
 

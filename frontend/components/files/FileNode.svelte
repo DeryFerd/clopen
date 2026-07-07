@@ -8,6 +8,7 @@
 	import { getGitStatusColor, getGitStatusBadgeLabel, getGitStatusLabel } from '$frontend/utils/git-status';
 	import { onMount } from 'svelte';
 	import { isLocalConnection, isMac, isWindows, isLinux } from '$frontend/utils/platform';
+	import { ignoredPathsState } from '$frontend/stores/features/ignored-paths.svelte';
 	import { isExtractableArchive } from '$frontend/utils/archive';
 
 	const {
@@ -71,7 +72,7 @@
 		'Show in File Manager'
 	);
 
-
+	const isIgnored = $derived(ignoredPathsState.set.has(file.path));
 
 	const isBusy = $derived(busyPaths.has(file.path));
 
@@ -248,18 +249,18 @@
 				aria-label="Working"
 			></span>
 		{:else}
-			<Icon name={getDisplayIcon(file.name, file.type === 'directory')} />
+			<Icon name={getDisplayIcon(file.name, file.type === 'directory')} class={isIgnored ? 'text-slate-300 dark:text-slate-600' : ''} />
 		{/if}
 	</span>
 
 	<!-- File/folder name -->
-	<span class="flex-1 text-sm font-medium text-slate-700 dark:text-slate-300 truncate min-w-0">
+	<span class="flex-1 text-sm font-medium truncate min-w-0 {isIgnored ? 'text-slate-300 dark:text-slate-600' : 'text-slate-700 dark:text-slate-300'}">
 		{file.name}
 	</span>
 
 	<!-- Status indicators (unsaved dot + git status letter) -->
 	{#if showModifiedIndicator || gitStatusCode}
-		<span class="flex items-center gap-1 flex-shrink-0">
+		<span class="flex items-center gap-1 flex-shrink-0 {isIgnored ? 'opacity-40' : ''}">
 			{#if showModifiedIndicator}
 				<span
 					class="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-600"

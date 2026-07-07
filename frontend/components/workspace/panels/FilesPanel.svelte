@@ -86,6 +86,11 @@
 		refreshGitStatus,
 		syncGitStatusForProject
 	} from '$frontend/stores/features/git-status.svelte';
+	import {
+		ignoredPathsState,
+		initIgnoredPaths,
+		refreshIgnoredPaths
+	} from '$frontend/stores/features/ignored-paths.svelte';
 
 	// Props
 	interface Props {
@@ -1960,6 +1965,7 @@
 
 		// Sync git status for the new project
 		syncGitStatusForProject();
+		refreshIgnoredPaths();
 
 		// Restore from DB then load the tree
 		restoreAndLoad(currentProjectId, currentProjectPath);
@@ -2263,6 +2269,7 @@
 	onMount(() => {
 		// Subscribe git status to file change events (idempotent)
 		initGitStatus();
+		initIgnoredPaths();
 
 		// Safety-net reconcile when the user returns to the app/tab. File-watch
 		// push events can be missed while the window is hidden (OS throttling,

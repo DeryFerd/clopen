@@ -27,11 +27,27 @@ export function initMonaco(): Promise<typeof Monaco> {
 		monacoPromise = loader.init().then((monaco) => {
 			configureCompilerOptions(monaco);
 			configureDiagnostics(monaco);
+			registerEnvLanguage(monaco);
 			registerSqlAutocomplete(monaco);
 			return monaco;
 		});
 	}
 	return monacoPromise;
+}
+
+function registerEnvLanguage(monaco: typeof Monaco) {
+	monaco.languages.register({ id: 'env' });
+	monaco.languages.setMonarchTokensProvider('env', {
+		tokenizer: {
+			root: [
+				[/#.*$/, 'comment'],
+				[/'[^']*'/, 'string'],
+				[/"[^"]*"/, 'string'],
+				[/\$\{[^}]*\}/, 'variable'],
+				[/^([\w.[\]]+)\s*(=)\s*(.*)$/, ['key', 'delimiter', 'value']],
+			],
+		},
+	});
 }
 
 const DEFAULT_FILENAME_BY_LANGUAGE: Record<string, string> = {

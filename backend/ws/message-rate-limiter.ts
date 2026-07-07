@@ -18,13 +18,20 @@ interface RateLimitConfig {
 	throttleThreshold: number;
 	disconnectThreshold: number;
 	windowMs: number;
+	// Exponential backoff configuration
+	baseLockoutMs: number;
+	maxLockoutMs: number;
+	lockoutResetMs: number;
 }
 
 const DEFAULT_CONFIG: RateLimitConfig = {
 	warningThreshold: 50,
 	throttleThreshold: 100,
 	disconnectThreshold: 200,
-	windowMs: 1000
+	windowMs: 1000,
+	baseLockoutMs: 5000, // 5 seconds base lockout
+	maxLockoutMs: 1800000, // 30 minutes max lockout
+	lockoutResetMs: 300000 // 5 minutes without violations resets backoff
 };
 
 interface ConnectionRateState {
@@ -33,6 +40,10 @@ interface ConnectionRateState {
 	isThrottled: boolean;
 	isFlagged: boolean;
 	messagesDropped: number;
+	// Exponential backoff state
+	lockoutCount: number;
+	lockedUntil: number;
+	lastLockoutTime: number;
 }
 
 export class MessageRateLimiter {
@@ -52,7 +63,10 @@ export class MessageRateLimiter {
 				isWarning: false,
 				isThrottled: false,
 				isFlagged: false,
-				messagesDropped: 0
+				messagesDropped: 0,
+				lockoutCount: 0,
+				lockedUntil: 0,
+				lastLockoutTime: 0
 			};
 			this.connectionStates.set(raw, state);
 		}
@@ -62,6 +76,19 @@ export class MessageRateLimiter {
 	checkRateLimit(conn: WSConnection, action: string): boolean {
 		const state = this.getState(conn);
 		const now = Date.now();
+
+		// Check if connection is currently locked out
+		if (state.lockedUntil > now) {
+			state.messagesDropped++;
+			return false;
+		}
+
+		// Reset lockout count if enough time has passed since last violation
+		if (state.lastLockoutTime > 0 && now - state.lastLockoutTime > this.config.lockoutResetMs) {
+			state.lockoutCount = 0;
+			debug.log('rate-limit', `Lockout count reset for connection after ${this.config.lockoutResetMs}ms without violations`);
+		}
+
 		const windowStart = now - this.config.windowMs;
 		state.messageTimestamps = state.messageTimestamps.filter(ts => ts > windowStart);
 		state.messageTimestamps.push(now);
@@ -74,7 +101,18 @@ export class MessageRateLimiter {
 				state.isFlagged = true;
 				state.isThrottled = true;
 				state.isWarning = false;
-				debug.warn('rate-limit', `Connection flagged for disconnect: ${messagesPerSecond.toFixed(0)} msg/s on action ${action}`);
+
+				// Apply exponential backoff before disconnect
+				state.lockoutCount++;
+				state.lastLockoutTime = now;
+				const lockoutDuration = Math.min(
+					this.config.baseLockoutMs * Math.pow(2, state.lockoutCount - 1),
+					this.config.maxLockoutMs
+				);
+				state.lockedUntil = now + lockoutDuration;
+
+				debug.warn('rate-limit', `Connection flagged for disconnect: ${messagesPerSecond.toFixed(0)} msg/s on action ${action}. Lockout #${state.lockoutCount} for ${lockoutDuration}ms`);
+				
 				try {
 					conn.close(1008, 'Rate limit exceeded');
 				} catch (error) {
@@ -89,7 +127,17 @@ export class MessageRateLimiter {
 			if (!state.isThrottled) {
 				state.isThrottled = true;
 				state.isWarning = false;
-				debug.warn('rate-limit', `Connection throttled: ${messagesPerSecond.toFixed(0)} msg/s on action ${action}`);
+
+				// Apply exponential backoff for throttle violations
+				state.lockoutCount++;
+				state.lastLockoutTime = now;
+				const lockoutDuration = Math.min(
+					this.config.baseLockoutMs * Math.pow(2, state.lockoutCount - 1),
+					this.config.maxLockoutMs
+				);
+				state.lockedUntil = now + lockoutDuration;
+
+				debug.warn('rate-limit', `Connection throttled: ${messagesPerSecond.toFixed(0)} msg/s on action ${action}. Lockout #${state.lockoutCount} for ${lockoutDuration}ms`);
 			}
 			state.messagesDropped++;
 			return false;
@@ -115,13 +163,20 @@ export class MessageRateLimiter {
 		return this.getState(conn).isFlagged;
 	}
 
-	getConnectionStats(conn: WSConnection): { messagesPerSecond: number; isThrottled: boolean; isFlagged: boolean; messagesDropped: number } | null {
+	getConnectionStats(conn: WSConnection): { messagesPerSecond: number; isThrottled: boolean; isFlagged: boolean; messagesDropped: number; lockoutCount: number; lockedUntil: number } | null {
 		const state = this.getState(conn);
 		const now = Date.now();
 		const windowStart = now - this.config.windowMs;
 		const recentMessages = state.messageTimestamps.filter(ts => ts > windowStart);
 		const messagesPerSecond = recentMessages.length / (this.config.windowMs / 1000);
-		return { messagesPerSecond, isThrottled: state.isThrottled, isFlagged: state.isFlagged, messagesDropped: state.messagesDropped };
+		return { 
+			messagesPerSecond, 
+			isThrottled: state.isThrottled, 
+			isFlagged: state.isFlagged, 
+			messagesDropped: state.messagesDropped,
+			lockoutCount: state.lockoutCount,
+			lockedUntil: state.lockedUntil
+		};
 	}
 
 	reset(conn: WSConnection): void {

@@ -16,6 +16,7 @@ import {
 import { settingsQueries, auditLogQueries } from '$backend/database/queries';
 import { getTokenType } from '$backend/auth/tokens';
 import { authRateLimiter } from '$backend/auth/rate-limiter';
+import { setupMutex, SETUP_LOCK_KEY } from '$backend/auth/setup-mutex';
 import { ws } from '$backend/utils/ws';
 import { clientIpFromConnection } from '$backend/utils/client-ip';
 
@@ -41,29 +42,31 @@ export const loginHandler = createRouter()
 			expiresAt: t.String()
 		})
 	}, async ({ data, conn }) => {
-		const result = createAdmin(data.name);
+		return setupMutex.run(SETUP_LOCK_KEY, async () => {
+			const result = createAdmin(data.name);
 
-		// Save authMode to system settings
-		const currentSettings = settingsQueries.get('system:settings');
-		const parsed = currentSettings?.value
-			? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
-			: {};
-		parsed.authMode = 'required';
-		settingsQueries.set('system:settings', JSON.stringify(parsed));
+			// Save authMode to system settings
+			const currentSettings = settingsQueries.get('system:settings');
+			const parsed = currentSettings?.value
+				? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
+				: {};
+			parsed.authMode = 'required';
+			settingsQueries.set('system:settings', JSON.stringify(parsed));
 
-		auditLogQueries.logEvent({
-			userId: result.user.id,
-			actorUserId: result.user.id,
-			eventType: 'auth:setup',
-			eventDetails: `Admin account created: ${result.user.name}`,
-			ipAddress: clientIpFromConnection(conn)
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:setup',
+				eventDetails: `Admin account created: ${result.user.name}`,
+				ipAddress: clientIpFromConnection(conn)
+			});
+
+			// Set auth on connection
+			const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
+			ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
+
+			return result;
 		});
-
-		// Set auth on connection
-		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
-		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
-
-		return result;
 	})
 
 	// Setup no-auth mode — create default admin, save authMode setting
@@ -75,34 +78,41 @@ export const loginHandler = createRouter()
 			expiresAt: t.String()
 		})
 	}, async ({ conn }) => {
-		if (!needsSetup()) {
-			throw new Error('Setup already completed.');
-		}
+		return setupMutex.run(SETUP_LOCK_KEY, async () => {
+			if (!needsSetup()) {
+				throw new Error('Setup already completed.');
+			}
 
-		// Save authMode to system settings
-		const currentSettings = settingsQueries.get('system:settings');
-		const parsed = currentSettings?.value
-			? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
-			: {};
-		parsed.authMode = 'none';
-		settingsQueries.set('system:settings', JSON.stringify(parsed));
+			// Create or get default admin FIRST. The user-creation path is the
+			// real safety gate: if two setup requests race, the second one
+			// fails at `needsSetup()` once the first creates a user. We must
+			// not write the authMode setting before that, otherwise a race
+			// could leave authMode: 'none' persisted while the user was
+			// actually created via the 'required' path.
+			const result = createOrGetNoAuthAdmin();
 
-		// Create or get default admin
-		const result = createOrGetNoAuthAdmin();
+			// Save authMode to system settings AFTER user is created.
+			const currentSettings = settingsQueries.get('system:settings');
+			const parsed = currentSettings?.value
+				? (typeof currentSettings.value === 'string' ? JSON.parse(currentSettings.value) : currentSettings.value)
+				: {};
+			parsed.authMode = 'none';
+			settingsQueries.set('system:settings', JSON.stringify(parsed));
 
-		auditLogQueries.logEvent({
-			userId: result.user.id,
-			actorUserId: result.user.id,
-			eventType: 'auth:setup-no-auth',
-			eventDetails: `No-auth mode enabled, admin: ${result.user.name}`,
-			ipAddress: clientIpFromConnection(conn)
+			auditLogQueries.logEvent({
+				userId: result.user.id,
+				actorUserId: result.user.id,
+				eventType: 'auth:setup-no-auth',
+				eventDetails: `No-auth mode enabled, admin: ${result.user.name}`,
+				ipAddress: clientIpFromConnection(conn)
+			});
+
+			// Set auth on connection
+			const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
+			ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
+
+			return result;
 		});
-
-		// Set auth on connection
-		const tokenHash = (await import('$backend/auth/tokens')).hashToken(result.sessionToken);
-		ws.setAuth(conn, result.user.id, result.user.role, tokenHash);
-
-		return result;
 	})
 
 	// Auto-login for no-auth mode (returning visitors)

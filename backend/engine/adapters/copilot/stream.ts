@@ -13,6 +13,8 @@ import type {
 	ResumeSessionConfig,
 	SessionEvent,
 	ModelInfo,
+	PermissionRequest,
+	PermissionRequestResult,
 } from '@github/copilot-sdk';
 import type { EngineOutput, EngineModel } from '$shared/types/unified';
 import type { AIEngine, EngineQueryOptions, StructuredGenerationOptions } from '../../types';
@@ -21,7 +23,10 @@ import { engineQueries } from '$backend/database/queries/engine-queries';
 import { resolveOsPath, getEngineUserConfigDir } from '$backend/utils/paths';
 import { debug } from '$shared/utils/logger';
 import { getCopilotMcpConfig } from '../../../mcp';
+import { artifactFilter } from '$backend/profiles';
 import { syncSkills } from '$backend/skills';
+import { syncEngineArtifacts } from '$backend/engine/artifact-sync';
+import { resolvePermissionsFromDb, isToolAllowed, type ResolvedPermissions } from '$backend/permissions';
 import { handleStreamError, buildSessionError } from './error-handler';
 import { fetchCopilotModels } from './models';
 
@@ -30,6 +35,33 @@ import { fetchCopilotModels } from './models';
 // `onUserInputRequest`'s return type is exactly that shape — derive
 // it from the SessionConfig field so we don't drift from the SDK.
 type UserInputResponse = Awaited<ReturnType<NonNullable<SessionConfig['onUserInputRequest']>>>;
+
+/**
+ * Map a Copilot permission request to the token the permission policy matches on.
+ * MCP / custom tools carry a `toolName`; everything else is matched by its
+ * operation `kind` (`shell` / `write` / `read` / `url` / `memory` / …), which is
+ * why the Copilot builtin catalog lists kinds rather than tool names.
+ */
+function copilotPermissionToken(request: PermissionRequest): string {
+	const named = (request as { toolName?: string }).toolName;
+	return named && named.trim() ? named : request.kind;
+}
+
+/**
+ * Enforce the resolved permission policy for one Copilot request. Returns a
+ * reject decision for blocked tools, or null to fall through to auto-approve.
+ */
+function enforceCopilotPermission(
+	permissions: ResolvedPermissions,
+	request: PermissionRequest
+): PermissionRequestResult | null {
+	const token = copilotPermissionToken(request);
+	if (!isToolAllowed(permissions, token)) {
+		debug.log('permissions', `⛔ Blocked tool "${token}" (Clopen permission policy)`);
+		return { kind: 'reject', feedback: `Blocked by Clopen permission policy: ${token}` };
+	}
+	return null;
+}
 import {
 	createStreamConverterState,
 	convertSessionStart,
@@ -194,8 +226,17 @@ export class CopilotEngine implements AIEngine {
 
 		this.activeController = abortController || new AbortController();
 
+		// Active Profile for this stream — scopes artifacts + connectors.
+		const profileId = options.mcpContext?.profileId;
+		const mcpProfileFilter = artifactFilter(profileId, 'mcp') ?? undefined;
+
 		// Mirror enabled skills into Copilot's native skills dir before the turn.
-		await syncSkills('copilot');
+		await syncSkills('copilot', profileId);
+		await syncEngineArtifacts('copilot', profileId);
+
+		// Resolve the permission policy once per stream; onPermissionRequest below
+		// enforces it (Copilot otherwise approves every tool via approveAll).
+		const permissions = resolvePermissionsFromDb('copilot', options.mcpContext?.projectId, profileId);
 
 		const resolvedProjectPath = resolveOsPath(projectPath);
 		const state = createStreamConverterState('', modelId);
@@ -249,10 +290,11 @@ export class CopilotEngine implements AIEngine {
 		this.activeController.signal.addEventListener('abort', onAbort, { once: true });
 
 		try {
-			const mcpConfig = getCopilotMcpConfig();
+			const mcpConfig = getCopilotMcpConfig(mcpProfileFilter);
 
 			const baseConfig: ResumeSessionConfig = {
-				onPermissionRequest: approveAll,
+				onPermissionRequest: (request, invocation) =>
+					enforceCopilotPermission(permissions, request) ?? approveAll(request, invocation),
 				// Enables the agent's `ask_user` tool. Without this callback the
 				// SDK reports `requestUserInput: false` to the server and the
 				// tool is not exposed to the model, so the AskUserQuestion

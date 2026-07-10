@@ -33,6 +33,12 @@ import { systemToolsRouter } from './system-tools';
 import { dbClientRouter } from './db-client';
 import { mcpRouter } from './mcp';
 import { skillsRouter } from './skills';
+import { commandsRouter } from './commands';
+import { subagentsRouter } from './subagents';
+import { instructionsRouter } from './instructions';
+import { permissionsRouter } from './permissions';
+import { profilesRouter } from './profiles';
+import { artifactsRouter } from './artifacts';
 
 // ============================================
 // Main App Router - Merge All Module Routers
@@ -81,7 +87,17 @@ export const wsRouter = createRouter()
 	.merge(mcpRouter)
 
 	// Agent Skills management (create, import, install from a marketplace)
-	.merge(skillsRouter);
+	.merge(skillsRouter)
+
+	// Custom Commands, Subagents, and Project Instructions (artifact framework)
+	.merge(commandsRouter)
+	.merge(subagentsRouter)
+	.merge(instructionsRouter)
+	.merge(permissionsRouter)
+
+	// Profiles (reusable artifact bundles activated per-session)
+	.merge(profilesRouter)
+	.merge(artifactsRouter);
 
 // Export API type for frontend type-safe access
 export type WSAPI = typeof wsRouter['$api'];

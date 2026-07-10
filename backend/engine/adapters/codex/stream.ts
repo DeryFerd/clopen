@@ -29,6 +29,7 @@ import { resolveBinary } from '$backend/utils/cli';
 import { getCleanSpawnEnv } from '$backend/utils/index.js';
 import { getCodexMcpConfig } from '../../../mcp';
 import { syncSkills } from '$backend/skills';
+import { syncEngineArtifacts } from '$backend/engine/artifact-sync';
 import { CODEX_MODELS } from './models';
 import { debug } from '$shared/utils/logger';
 import { handleStreamError, buildTurnError } from './error-handler';
@@ -139,8 +140,15 @@ export class CodexEngine implements AIEngine {
 	async *streamQuery(options: EngineQueryOptions): AsyncGenerator<EngineOutput, void, unknown> {
 		const { projectPath, prompt, resume, modelId, abortController, accountId } = options;
 
+		// Active Profile for this stream — scopes the materialized artifact set.
+		// Note: Codex MCP config is baked in at client construction (see
+		// initialize()), so per-stream profile filtering of CONNECTORS is not
+		// applied here — consistent with Codex's existing best-effort MCP status
+		// (Prompt 2). Skills/Commands/Subagents ARE scoped, since they re-sync here.
+		const profileId = options.mcpContext?.profileId;
 		// Refresh the synthetic skills preamble in CODEX_HOME before the turn.
-		await syncSkills('codex');
+		await syncSkills('codex', profileId);
+		await syncEngineArtifacts('codex', profileId);
 
 		// Per-stream account override — same shape as Copilot. The SDK takes
 		// the apiKey at construction time, so an account switch requires

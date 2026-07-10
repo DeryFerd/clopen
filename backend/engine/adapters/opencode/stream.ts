@@ -38,12 +38,58 @@ import {
 	convertReasoningStreamStop,
 	convertSubtaskToolUseOnly,
 	getToolInput,
+	mapToolName,
+	TOOL_NAME_MAP,
 } from './message-converter';
 import { ensureClient, getClient, getServerUrl } from './server';
 import { syncSkills } from '$backend/skills';
+import { syncEngineArtifacts } from '$backend/engine/artifact-sync';
+import { resolvePermissionsFromDb, matchesAny, type ResolvedPermissions } from '$backend/permissions';
 import { formatSessionError, handleStreamError } from './error-handler';
 import { buildJsonPrompt, extractJson } from '../../structured-helpers';
 import { debug } from '$shared/utils/logger';
+
+/**
+ * Whether a permission policy blocks an OpenCode tool. Matched under BOTH the
+ * raw OpenCode tool id (e.g. `bash`) and its canonical `mapToolName` form (e.g.
+ * `Bash`, `mcp__server__tool`), so a rule written in either naming takes effect.
+ * Deny wins; a non-empty allowlist blocks anything not matched under either name.
+ */
+function isOpenCodeToolBlocked(permissions: ResolvedPermissions, rawTool: string): boolean {
+	const names = Array.from(new Set([rawTool, mapToolName(rawTool)].filter(Boolean)));
+	if (names.some(n => matchesAny(permissions.deny, n))) return true;
+	if (permissions.allow.length > 0 && !names.some(n => matchesAny(permissions.allow, n))) return true;
+	return false;
+}
+
+/**
+ * Per-prompt tool disable map (`{ toolId: false }`) enforcing the resolved
+ * permission policy UP FRONT — OpenCode's `permission.asked` event only fires for
+ * a subset of built-in tools (edit/bash/webfetch/…), never for read-only or MCP
+ * tools, so a deny on those would otherwise be silently ignored (this is exactly
+ * why a profile's MCP-tool deny worked on Claude's `canUseTool` but not here).
+ * Passing the blocked tools as disabled removes them from the model's toolset
+ * entirely — the OpenCode analogue of Claude/Qwen `excludeTools`.
+ *
+ * Coverage: every known built-in tool id plus each EXACT `mcp__<ns>__<tool>` deny
+ * (mapped to OpenCode's `<ns>_<tool>` id). Wildcard MCP denies and allowlist-vs-
+ * MCP remain best-effort (the full live MCP tool list isn't known synchronously
+ * here) and still fall back to the bridge / permission.asked path.
+ */
+function buildOpenCodeToolDisableMap(permissions: ResolvedPermissions): Record<string, boolean> {
+	const disable: Record<string, boolean> = {};
+	// Built-in tools: test every OpenCode tool id we know the canonical name for.
+	for (const rawTool of Object.keys(TOOL_NAME_MAP)) {
+		if (isOpenCodeToolBlocked(permissions, rawTool)) disable[rawTool] = false;
+	}
+	// Exact MCP-tool denies → OpenCode's underscore-joined id (`<ns>_<tool>`).
+	for (const pattern of permissions.deny) {
+		if (pattern.endsWith('*')) continue;
+		const m = /^mcp__(.+?)__(.+)$/.exec(pattern);
+		if (m) disable[`${m[1]}_${m[2]}`] = false;
+	}
+	return disable;
+}
 
 // ============================================================================
 // OpenCode Engine (per-project instance)
@@ -121,8 +167,20 @@ export class OpenCodeEngine implements AIEngine {
 		this._isActive = true;
 		this.activeProjectPath = projectPath;
 
+		// Active Profile for this stream — scopes the materialized artifact set.
+		// (OpenCode MCP config lives on the persistent server, not per-stream, so
+		// connector filtering by profile is not applied here — best-effort, like
+		// Codex. Skills/Commands/Subagents + permissions ARE profile-scoped.)
+		const profileId = options.mcpContext?.profileId;
 		// Refresh the synthetic skills preamble in OpenCode's config dir.
-		await syncSkills('opencode');
+		await syncSkills('opencode', profileId);
+		await syncEngineArtifacts('opencode', profileId);
+
+		// Resolve the permission policy once per stream; the permission event
+		// handler enforces it (OpenCode otherwise auto-approves every tool). Tool
+		// identity is matched in the canonical `mapToolName` form so a rule like
+		// `mcp__server__tool` works across Claude and OpenCode alike.
+		const permissions = resolvePermissionsFromDb('opencode', options.mcpContext?.projectId, profileId);
 
 		debug.log('chat', 'Open Code - Stream Query');
 		debug.log('chat', { prompt });
@@ -167,12 +225,16 @@ export class OpenCodeEngine implements AIEngine {
 				signal: this.activeAbortController.signal
 			});
 
-			// 2. Send prompt asynchronously (non-blocking)
+			// 2. Send prompt asynchronously (non-blocking). Disabled tools enforce
+			// the deny policy up front (covers read-only + MCP tools that never fire
+			// a permission event — see buildOpenCodeToolDisableMap).
+			const disabledTools = buildOpenCodeToolDisableMap(permissions);
 			client.session.promptAsync({
 				path: { id: sessionId },
 				body: {
 					parts: promptParts as any,
 					...(providerSlug && modelId ? { model: { providerID: providerSlug, modelID: modelId } } : {}),
+					...(Object.keys(disabledTools).length > 0 ? { tools: disabledTools } : {}),
 				},
 				query: { directory: projectPath },
 			}).catch(error => {
@@ -188,6 +250,9 @@ export class OpenCodeEngine implements AIEngine {
 			let streamingText = '';
 			const emittedToolParts = new Set<string>(); // Tool parts already emitted as tool_use
 			const completedToolParts = new Set<string>(); // Tool parts whose tool_result was emitted
+			// callID/partId → raw tool name, so a `permission.asked` event (which
+			// carries only a callID) can be resolved to the tool being permitted.
+			const callIdToTool = new Map<string, string>();
 			const emittedReasoningParts = new Set<string>(); // Reasoning parts already flushed
 			let reasoningStreamActive = false; // Whether reasoning is currently streaming
 			let reasoningText = ''; // Accumulated reasoning text
@@ -349,6 +414,14 @@ export class OpenCodeEngine implements AIEngine {
 							if (part.type === 'tool') {
 								const toolPart = part as ToolPart;
 								const msg = assistantMessages.get(msgId);
+
+								// Register the tool name against its callID/partId as early as
+								// possible (even while pending) so a permission request can be
+								// resolved to it before the tool executes.
+								if (toolPart.tool) {
+									if (toolPart.callID) callIdToTool.set(toolPart.callID, toolPart.tool);
+									callIdToTool.set(toolPart.id, toolPart.tool);
+								}
 
 								// Flush reasoning before tool rendering to preserve order
 								if (msg && reasoningStreamActive) {
@@ -638,17 +711,26 @@ export class OpenCodeEngine implements AIEngine {
 							break;
 						}
 
-						// v2 permission event — auto-approve to avoid blocking the session
-						// (tool permissions like file_write, bash, etc. are bypassed)
+						// v2 permission event — consult the permission policy, then
+						// approve (default) or reject the tool. OpenCode otherwise
+						// bypasses every tool permission.
 						case 'permission.asked':
 						case 'permission.updated': {
 							const props = evt.properties as {
 								id: string;
 								sessionID: string;
 								callID?: string;
+								type?: string;
 							};
 							if (props.sessionID !== sessionId) break;
-							this.autoApprovePermission(props.id, props.sessionID);
+							// Resolve the tool being permitted (callID → tool name captured
+							// from the tool-part stream; fall back to the event `type`).
+							const rawTool = (props.callID && callIdToTool.get(props.callID)) || props.type;
+							const blocked = rawTool ? isOpenCodeToolBlocked(permissions, rawTool) : false;
+							if (blocked) {
+								debug.log('permissions', `⛔ Blocked tool "${rawTool}" (Clopen permission policy)`);
+							}
+							this.replyPermission(props.id, props.sessionID, blocked ? 'reject' : 'once');
 							break;
 						}
 
@@ -842,21 +924,24 @@ export class OpenCodeEngine implements AIEngine {
 	}
 
 	/**
-	 * Auto-approve a permission request to avoid blocking the session.
-	 * Uses direct HTTP since the v1 client may not have the v2 permission.reply method.
+	 * Reply to a permission request. `response` is `'once'` to approve (the
+	 * default, keeping the session unblocked) or `'reject'` to deny a tool blocked
+	 * by the permission policy. Uses direct HTTP since the v1 client may not have
+	 * the v2 permission.reply method.
 	 */
-	private autoApprovePermission(permissionId: string, sessionId: string): void {
+	private replyPermission(permissionId: string, sessionId: string, response: 'once' | 'reject'): void {
 		const serverUrl = getServerUrl();
 		if (!serverUrl) return;
+		const verb = response === 'reject' ? 'rejected' : 'approved';
 
 		// Try v2 endpoint first (/permission/{requestID}/reply), fall back to v1
 		fetch(`${serverUrl}/permission/${permissionId}/reply`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ reply: 'once' }),
+			body: JSON.stringify({ reply: response }),
 		}).then(res => {
 			if (res.ok) {
-				debug.log('engine', `[OC] auto-approved permission ${permissionId} (v2)`);
+				debug.log('engine', `[OC] ${verb} permission ${permissionId} (v2)`);
 				return;
 			}
 			// v2 endpoint not available — try v1
@@ -864,16 +949,16 @@ export class OpenCodeEngine implements AIEngine {
 			if (client) {
 				client.postSessionIdPermissionsPermissionId({
 					path: { id: sessionId, permissionID: permissionId },
-					body: { response: 'once' },
+					body: { response },
 					...(this.activeProjectPath && { query: { directory: this.activeProjectPath } }),
 				}).then(() => {
-					debug.log('engine', `[OC] auto-approved permission ${permissionId} (v1)`);
+					debug.log('engine', `[OC] ${verb} permission ${permissionId} (v1)`);
 				}).catch(err => {
-					debug.error('engine', 'Failed to auto-approve permission (v1):', err);
+					debug.error('engine', 'Failed to reply to permission (v1):', err);
 				});
 			}
 		}).catch(error => {
-			debug.error('engine', 'Failed to auto-approve permission:', error);
+			debug.error('engine', 'Failed to reply to permission:', error);
 		});
 	}
 

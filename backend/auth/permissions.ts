@@ -113,6 +113,11 @@ export const ADMIN_ONLY_ROUTES = new Set([
 	'mcp:status',
 	'mcp:oauth-start',
 	'mcp:oauth-complete',
+	// Per-tool control + inspector — introspects/filters an installed server's
+	// tools and can invoke them, so it stays within the admin-only MCP surface.
+	'mcp:tools',
+	'mcp:set-tool-overrides',
+	'mcp:call-tool',
 	// Agent Skills — creating/importing/installing skills writes to the shared
 	// canonical store and applies to every engine, so the whole surface is
 	// admin-only, mirroring MCP and System Tools.
@@ -125,7 +130,52 @@ export const ADMIN_ONLY_ROUTES = new Set([
 	'skills:toggle',
 	'skills:delete',
 	'skills:catalog',
-	'skills:install'
+	'skills:install',
+	// Custom Commands — same shared-store rationale as Skills; admin-only surface.
+	'commands:list',
+	'commands:get',
+	'commands:create',
+	'commands:update',
+	'commands:parse-import',
+	'commands:import',
+	'commands:toggle',
+	'commands:delete',
+	'commands:detect',
+	// Subagents — shared canonical store applied to every engine; admin-only.
+	'subagents:list',
+	'subagents:get',
+	'subagents:create',
+	'subagents:update',
+	'subagents:parse-import',
+	'subagents:import',
+	'subagents:toggle',
+	'subagents:delete',
+	'subagents:detect',
+	// Project Instructions — writes managed regions into engine memory files; admin-only.
+	'instructions:get-global',
+	'instructions:save-global',
+	'instructions:get-project',
+	'instructions:save-project',
+	// Permissions — per-engine tool allow/deny applied to every engine/project;
+	// same shared-store rationale as Skills/MCP, admin-only surface.
+	'permissions:list',
+	'permissions:inventory',
+	'permissions:save',
+	// AI authoring of artifacts — part of the admin artifact editors.
+	'artifacts:generate',
+	// Profiles — reusable artifact bundles applied to every collaborator's
+	// sessions; same shared-store rationale as Skills/MCP, admin-only surface.
+	// (profiles:available / profiles:project-default stay non-admin — choosing a
+	// profile for a session is a run choice like the model.)
+	'profiles:list',
+	'profiles:get',
+	'profiles:inventory',
+	'profiles:create',
+	'profiles:update',
+	'profiles:delete',
+	'profiles:get-permissions',
+	'profiles:save-permissions',
+	'profiles:set-project-default'
 ]);
 
 /**

@@ -28,6 +28,9 @@ import { setupEnvironmentOnce, getEngineEnv } from './environment';
 import { handleStreamError } from './error-handler';
 import { getEnabledMcpServers, getAllowedMcpTools } from '../../../mcp';
 import { syncSkills } from '$backend/skills';
+import { syncEngineArtifacts } from '$backend/engine/artifact-sync';
+import { artifactFilter } from '$backend/profiles';
+import { resolvePermissionsFromDb, isToolAllowed, syncPermissions } from '$backend/permissions';
 import type { AIEngine, EngineQueryOptions } from '../../types';
 import type { EngineModel } from '$shared/types/unified';
 import { CLAUDE_CODE_MODELS } from './models';
@@ -99,13 +102,28 @@ export class ClaudeCodeEngine implements AIEngine {
     const resolvedProjectPath = resolveOsPath(projectPath);
 
     try {
+      // Active Profile for this stream (resolved in stream-manager). Scopes the
+      // materialized artifact set + MCP connectors to the profile's bundle.
+      const profileId = options.mcpContext?.profileId;
+      const mcpProfileFilter = artifactFilter(profileId, 'mcp') ?? undefined;
+
       // Materialize enabled skills into Claude's native skills dir before the
       // session starts so the SDK picks them up via settingSources.
-      await syncSkills('claude');
+      await syncSkills('claude', profileId);
+      // Commands, Subagents, and global Instructions share the same trigger.
+      await syncEngineArtifacts('claude', profileId);
+      // Write the resolved allow/deny into the isolated settings.json (honesty
+      // layer — the runtime hook below is the authoritative enforcement).
+      await syncPermissions('claude');
+
+      // Resolve the effective permission policy once per stream; the canUseTool
+      // hook consults it to actually block denied tools (Clopen otherwise
+      // auto-allows everything, so this hook is where deny gets its teeth).
+      const permissions = resolvePermissionsFromDb('claude-code', options.mcpContext?.projectId, profileId);
 
       // Get custom MCP servers and allowed tools
       // Pass mcpContext so tool handlers are bound to the correct project
-      const mcpServers = getEnabledMcpServers(options.mcpContext);
+      const mcpServers = getEnabledMcpServers(options.mcpContext, mcpProfileFilter);
       const allowedMcpTools = getAllowedMcpTools();
 
       debug.log('mcp', '📦 Loading custom MCP servers...');
@@ -157,7 +175,13 @@ export class ClaudeCodeEngine implements AIEngine {
               });
             });
           }
-          // Auto-allow all other tools
+          // Enforce the resolved permission policy: deny blocks the tool, an
+          // allowlist (when set) blocks anything not on it. Everything else is
+          // auto-allowed as before.
+          if (!isToolAllowed(permissions, _toolName)) {
+            debug.log('permissions', `⛔ Blocked tool "${_toolName}" (Clopen permission policy)`);
+            return { behavior: 'deny' as const, message: `Blocked by Clopen permission policy: ${_toolName}` };
+          }
           return { behavior: 'allow' as const, updatedInput: input };
         },
         ...(modelId && { model: modelId }),

@@ -46,7 +46,10 @@ import { handleStreamError } from './error-handler';
 import { createSdkMessageConverter, toSdkUserMessage, type SdkMessageConverter } from './message-converter';
 import { fetchQwenModels } from './models';
 import { getQwenMcpConfig } from '../../../mcp';
+import { artifactFilter } from '$backend/profiles';
 import { syncSkills } from '$backend/skills';
+import { syncEngineArtifacts } from '$backend/engine/artifact-sync';
+import { resolvePermissionsFromDb, isToolAllowed, excludedBuiltinTools } from '$backend/permissions';
 import { forkQwenSessionState, sessionStateExists } from './session-fork';
 
 interface PendingAskUserQuestion {
@@ -138,9 +141,17 @@ export class QwenEngine implements AIEngine {
 
 		this.activeController = abortController || new AbortController();
 		const resolvedProjectPath = resolveOsPath(projectPath);
+		// Active Profile for this stream — scopes artifacts + connectors.
+		const profileId = options.mcpContext?.profileId;
+		const mcpProfileFilter = artifactFilter(profileId, 'mcp') ?? undefined;
 		// Refresh the synthetic skills preamble in the Qwen memory file.
-		await syncSkills('qwen');
-		const mcpConfig = getQwenMcpConfig();
+		await syncSkills('qwen', profileId);
+		await syncEngineArtifacts('qwen', profileId);
+		const mcpConfig = getQwenMcpConfig(mcpProfileFilter);
+
+		// Resolve the permission policy once per stream; canUseTool enforces it
+		// (Qwen otherwise auto-allows everything). Tool names arrive snake_cased.
+		const permissions = resolvePermissionsFromDb('qwen', options.mcpContext?.projectId, profileId);
 
 		// Fork-by-copy on EVERY resume — same semantics as Claude
 		// (`forkSession: true`), OpenCode (`client.session.fork()`),
@@ -236,7 +247,11 @@ export class QwenEngine implements AIEngine {
 				// entry. The AUQ flow code (canUseTool handler, converter
 				// state, resolveUserAnswer, recordUserAnswer) is intentionally
 				// kept in place so reverting is a one-line change.
-				excludeTools: ['ask_user_question'],
+				// `canUseTool` (permissionMode 'default') only fires for WRITE tools,
+				// so read-only tools can't be blocked there. `excludeTools` has the
+				// highest permission priority, so denied/non-allowlisted built-ins are
+				// hidden from the model entirely. MCP tools are filtered at the bridge.
+				excludeTools: ['ask_user_question', ...excludedBuiltinTools(permissions, 'qwen')],
 				canUseTool: async (toolName, input, ctx) => {
 					// Qwen SDK passes the registered (snake_case) tool name here —
 					// `ToolNames.ASK_USER_QUESTION = "ask_user_question"` — NOT the
@@ -272,6 +287,11 @@ export class QwenEngine implements AIEngine {
 								toolUseId: null,
 							};
 						});
+					}
+					// Enforce the resolved permission policy before auto-allowing.
+					if (!isToolAllowed(permissions, toolName)) {
+						debug.log('permissions', `⛔ Blocked tool "${toolName}" (Clopen permission policy)`);
+						return { behavior: 'deny' as const, message: `Blocked by Clopen permission policy: ${toolName}` };
 					}
 					// Auto-allow everything else.
 					return { behavior: 'allow' as const, updatedInput: input };

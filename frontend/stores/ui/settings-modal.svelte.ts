@@ -7,11 +7,18 @@ import type { IconName } from '$shared/types/ui/icons';
 import type { EngineType } from '$shared/types/unified';
 
 export type SettingsSection =
-	| 'models'
+	| 'assistant'
+	| 'commit-message'
+	| 'artifacts'
 	| 'engines'
 	| 'system-tools'
 	| 'mcp'
 	| 'skills'
+	| 'commands'
+	| 'subagents'
+	| 'instructions'
+	| 'permissions'
+	| 'profiles'
 	| 'appearance'
 	| 'notifications'
 	| 'tunnel'
@@ -22,18 +29,18 @@ export type SettingsSection =
 
 /** Sidebar grouping. Sections are rendered under their group header. */
 export type SettingsGroup =
-	| 'assistant'
-	| 'extensions'
-	| 'general'
-	| 'account'
+	| 'models'
+	| 'infrastructure'
+	| 'artifacts-access'
+	| 'preferences'
 	| 'administration';
 
 /** Ordered group definitions for the settings sidebar. */
 export const settingsGroups: { id: SettingsGroup; label: string }[] = [
-	{ id: 'assistant', label: 'Assistant' },
-	{ id: 'extensions', label: 'Tools & Extensions' },
-	{ id: 'general', label: 'General' },
-	{ id: 'account', label: 'Account' },
+	{ id: 'models', label: 'Models' },
+	{ id: 'infrastructure', label: 'Infrastructure' },
+	{ id: 'artifacts-access', label: 'Artifacts & Access' },
+	{ id: 'preferences', label: 'Preferences' },
 	{ id: 'administration', label: 'Administration' }
 ];
 
@@ -60,34 +67,32 @@ export interface SettingsSectionMeta {
 
 export const settingsSections: SettingsSectionMeta[] = [
 	{
-		id: 'models',
-		label: 'Models',
+		id: 'assistant',
+		label: 'Assistant',
+		icon: 'lucide:bot',
+		description: 'Chat engine and model',
+		group: 'models'
+	},
+	{
+		id: 'commit-message',
+		label: 'Git',
+		icon: 'lucide:git-branch',
+		description: 'Commits and branches',
+		group: 'models'
+	},
+	{
+		id: 'artifacts',
+		label: 'Artifacts',
 		icon: 'lucide:sparkles',
-		description: 'Chat and commit model',
-		group: 'assistant'
+		description: 'Model for extensions',
+		group: 'models'
 	},
 	{
 		id: 'engines',
 		label: 'Engines',
-		icon: 'lucide:plug',
+		icon: 'lucide:circuit-board',
 		description: 'Accounts and providers',
-		group: 'extensions',
-		adminOnly: true
-	},
-	{
-		id: 'mcp',
-		label: 'MCP Servers',
-		icon: 'lucide:blocks',
-		description: 'Connect external tools',
-		group: 'extensions',
-		adminOnly: true
-	},
-	{
-		id: 'skills',
-		label: 'Skills',
-		icon: 'lucide:graduation-cap',
-		description: 'Reusable agent instructions',
-		group: 'extensions',
+		group: 'infrastructure',
 		adminOnly: true
 	},
 	{
@@ -95,7 +100,71 @@ export const settingsSections: SettingsSectionMeta[] = [
 		label: 'System Tools',
 		icon: 'lucide:hammer',
 		description: 'Server-side binaries',
-		group: 'extensions',
+		group: 'infrastructure',
+		adminOnly: true
+	},
+	{
+		id: 'tunnel',
+		label: 'Tunnel',
+		icon: 'lucide:globe',
+		description: 'Cloudflare tunnel services',
+		group: 'infrastructure',
+		adminOnly: true
+	},
+	{
+		id: 'mcp',
+		label: 'Connectors',
+		icon: 'lucide:plug',
+		description: 'Connect external tools (MCP)',
+		group: 'artifacts-access',
+		adminOnly: true
+	},
+	{
+		id: 'skills',
+		label: 'Skills',
+		icon: 'lucide:graduation-cap',
+		description: 'Reusable agent instructions',
+		group: 'artifacts-access',
+		adminOnly: true
+	},
+	{
+		id: 'commands',
+		label: 'Commands',
+		icon: 'lucide:terminal',
+		description: 'Custom slash commands',
+		group: 'artifacts-access',
+		adminOnly: true
+	},
+	{
+		id: 'subagents',
+		label: 'Subagents',
+		icon: 'lucide:bot',
+		description: 'Specialized delegated agents',
+		group: 'artifacts-access',
+		adminOnly: true
+	},
+	{
+		id: 'instructions',
+		label: 'Instructions',
+		icon: 'lucide:scroll-text',
+		description: 'Shared instruction block',
+		group: 'artifacts-access',
+		adminOnly: true
+	},
+	{
+		id: 'permissions',
+		label: 'Permissions',
+		icon: 'lucide:shield-check',
+		description: 'Per-engine tool allow/deny',
+		group: 'artifacts-access',
+		adminOnly: true
+	},
+	{
+		id: 'profiles',
+		label: 'Profiles',
+		icon: 'lucide:layers',
+		description: 'Reusable tool bundles',
+		group: 'artifacts-access',
 		adminOnly: true
 	},
 	{
@@ -103,29 +172,21 @@ export const settingsSections: SettingsSectionMeta[] = [
 		label: 'Appearance',
 		icon: 'lucide:palette',
 		description: 'Theme and layout',
-		group: 'general'
+		group: 'preferences'
 	},
 	{
 		id: 'notifications',
 		label: 'Notifications',
 		icon: 'lucide:bell',
 		description: 'Sound and push notifications',
-		group: 'general'
-	},
-	{
-		id: 'tunnel',
-		label: 'Tunnel',
-		icon: 'lucide:globe',
-		description: 'Cloudflare tunnel services',
-		group: 'general',
-		adminOnly: true
+		group: 'preferences'
 	},
 	{
 		id: 'account',
 		label: 'User Profile',
 		icon: 'lucide:user',
 		description: 'Your profile and access',
-		group: 'account'
+		group: 'preferences'
 	},
 	{
 		id: 'team',
@@ -156,12 +217,12 @@ export const settingsSections: SettingsSectionMeta[] = [
 // Create the state using Svelte 5 runes
 export const settingsModalState = $state<SettingsModalState>({
 	isOpen: false,
-	activeSection: 'models',
+	activeSection: 'assistant',
 	engineFocus: null
 });
 
 // Helper functions
-export function openSettingsModal(section: SettingsSection = 'models') {
+export function openSettingsModal(section: SettingsSection = 'assistant') {
 	settingsModalState.isOpen = true;
 	settingsModalState.activeSection = section;
 }

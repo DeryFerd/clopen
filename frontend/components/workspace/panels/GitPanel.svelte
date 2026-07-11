@@ -292,6 +292,8 @@
 	let nestedRemoteSearchQueries = $state<Record<string, string>>({});
 	let nestedShowCreateForm = $state<Record<string, boolean>>({});
 	let nestedNewBranchNames = $state<Record<string, string>>({});
+	let nestedBranchDrafts = $state<Record<string, string>>({});
+	let nestedShowBranchDrafts = $state<Record<string, boolean>>({});
 	let nestedBranchesSubTabs = $state<Record<string, 'local' | 'remote'>>({});
 	let nestedReposHeight = $state(300);
 	let nestedReposHeights = $state<Record<string, number>>({});
@@ -303,6 +305,17 @@
 	let mainTagsHeight = $state<number | undefined>(undefined);
 	let mainContributorsHeight = $state<number | undefined>(undefined);
 	let nestedReposCollapsed = $state<Record<string, boolean>>({});
+	let nestedShowAddRemoteForm = $state<Record<string, boolean>>({});
+	let nestedNewRemoteNames = $state<Record<string, string>>({});
+	let nestedNewRemoteUrls = $state<Record<string, string>>({});
+	let nestedAddingRemote = $state<Record<string, boolean>>({});
+	let nestedEditingRemote = $state<Record<string, string | null>>({});
+	let nestedEditRemoteNames = $state<Record<string, string>>({});
+	let nestedEditRemoteUrls = $state<Record<string, string>>({});
+	let nestedSavingRemote = $state<Record<string, boolean>>({});
+	let nestedFetchingRemote = $state<Record<string, string | null>>({});
+	let nestedActiveRemotes = $state<Record<string, string>>({});
+	let nestedRemotesList = $state<Record<string, GitRemote[]>>({});
 	const MIN_NESTED_REPO_HEIGHT = 250;
 	const MAX_NESTED_REPO_HEIGHT = 500;
 
@@ -626,6 +639,10 @@
 		nestedBranchesSubTabs = { ...nestedBranchesSubTabs, [relPath]: value };
 		nestedSearchQueries = { ...nestedSearchQueries, [relPath]: '' };
 		nestedRemoteSearchQueries = { ...nestedRemoteSearchQueries, [relPath]: '' };
+		if (value === 'remote' && !nestedRemotesList[relPath]) {
+			const nested = branchInfo?.nested?.find(n => n.relPath === relPath);
+			if (nested) void loadNestedRemotes(nested);
+		}
 	}
 	function toggleNestedCreateForm(relPath: string) {
 		nestedShowCreateForm = { ...nestedShowCreateForm, [relPath]: !nestedShowCreateForm[relPath] };
@@ -679,6 +696,8 @@
 	function getNestedSelectedRemote(nested: GitNestedRepoInfo): string {
 		const subRemotes = nestedRemoteNames(nested);
 		if (subRemotes.length === 0) return 'origin';
+		const active = nestedActiveRemotes[nested.relPath];
+		if (active && subRemotes.includes(active)) return active;
 		if (subRemotes.includes(selectedRemote)) return selectedRemote;
 		return subRemotes[0];
 	}
@@ -749,6 +768,95 @@
 				}
 			}
 		});
+	}
+
+	function setNestedActiveRemote(name: string, relPath: string) {
+		nestedActiveRemotes = { ...nestedActiveRemotes, [relPath]: name };
+	}
+
+	function getNestedActiveRemote(relPath: string): string | undefined {
+		return nestedActiveRemotes[relPath];
+	}
+
+	async function handleNestedAddRemote(relPath: string) {
+		if (!projectId) return;
+		const name = (nestedNewRemoteNames[relPath] ?? '').trim();
+		const url = (nestedNewRemoteUrls[relPath] ?? '').trim();
+		if (!name || !url) return;
+		nestedAddingRemote = { ...nestedAddingRemote, [relPath]: true };
+		try {
+			const nested = branchInfo?.nested?.find(n => n.relPath === relPath);
+			await ws.http('git:add-remote', { projectId, name, url, repoPath: nested?.path });
+			showInfo('Remote added', `${name} → ${url}`);
+			nestedNewRemoteNames = { ...nestedNewRemoteNames, [relPath]: '' };
+			nestedNewRemoteUrls = { ...nestedNewRemoteUrls, [relPath]: '' };
+			nestedShowAddRemoteForm = { ...nestedShowAddRemoteForm, [relPath]: false };
+			await loadBranches();
+			if (nested) await loadNestedRemotes(nested);
+		} catch (err) {
+			debug.error('git', 'Failed to add remote:', err);
+			showInfo('Add remote failed', (err as Error).message);
+		} finally {
+			nestedAddingRemote = { ...nestedAddingRemote, [relPath]: false };
+		}
+	}
+
+	async function handleNestedSaveRemote(relPath: string) {
+		if (!projectId) return;
+		const oldName = nestedEditingRemote[relPath] ?? '';
+		const newName = (nestedEditRemoteNames[relPath] ?? '').trim();
+		const newUrl = (nestedEditRemoteUrls[relPath] ?? '').trim();
+		if (!oldName || !newName || !newUrl) return;
+		nestedSavingRemote = { ...nestedSavingRemote, [relPath]: true };
+		try {
+			const nested = branchInfo?.nested?.find(n => n.relPath === relPath);
+			await ws.http('git:edit-remote', { projectId, oldName, newName, newUrl, repoPath: nested?.path });
+			showInfo('Remote updated', `${oldName} → ${newName}`);
+			nestedEditingRemote = { ...nestedEditingRemote, [relPath]: null };
+			nestedEditRemoteNames = { ...nestedEditRemoteNames, [relPath]: '' };
+			nestedEditRemoteUrls = { ...nestedEditRemoteUrls, [relPath]: '' };
+			await Promise.all([loadBranches(), nested ? loadNestedRemotes(nested) : Promise.resolve()]);
+		} catch (err) {
+			debug.error('git', 'Failed to update remote:', err);
+			showInfo('Update failed', (err as Error).message);
+		} finally {
+			nestedSavingRemote = { ...nestedSavingRemote, [relPath]: false };
+		}
+	}
+
+	async function handleNestedRemoveRemote(name: string, relPath: string) {
+		requestConfirm({
+			title: 'Remove Remote',
+			message: `Disconnect remote "${name}"? This will not delete the remote repository itself.`,
+			type: 'warning',
+			confirmText: 'Remove',
+			onConfirm: async () => {
+				if (!projectId) return;
+				try {
+					const nested = branchInfo?.nested?.find(n => n.relPath === relPath);
+					await ws.http('git:remove-remote', { projectId, name, repoPath: nested?.path });
+					await loadBranches();
+					if (nested) await loadNestedRemotes(nested);
+				} catch (err) {
+					debug.error('git', 'Failed to remove remote:', err);
+				}
+			}
+		});
+	}
+
+	async function handleNestedFetchRemote(remote: string, relPath: string) {
+		if (!projectId) return;
+		nestedFetchingRemote = { ...nestedFetchingRemote, [relPath]: remote };
+		try {
+			const nested = branchInfo?.nested?.find(n => n.relPath === relPath);
+			const result = await ws.http('git:fetch', { projectId, remote, repoPath: nested?.path }) as { message: string };
+			showInfo('Fetched', result.message);
+			await loadBranches();
+		} catch (err) {
+			debug.error('git', 'Failed to fetch remote:', err);
+		} finally {
+			nestedFetchingRemote = { ...nestedFetchingRemote, [relPath]: null };
+		}
 	}
 
 	interface BranchCommitState {
@@ -954,7 +1062,9 @@
 		type: 'warning' as 'info' | 'warning' | 'error' | 'success',
 		confirmText: 'Confirm',
 		cancelText: 'Cancel',
-		onConfirm: () => {}
+		inputValue: undefined as string | undefined,
+		inputPlaceholder: 'Enter value...',
+		onConfirm: (_value?: string) => {}
 	});
 
 	function requestConfirm(config: {
@@ -963,7 +1073,9 @@
 		type?: 'info' | 'warning' | 'error' | 'success';
 		confirmText?: string;
 		cancelText?: string;
-		onConfirm: () => void;
+		inputValue?: string;
+		inputPlaceholder?: string;
+		onConfirm: (value?: string) => void;
 	}) {
 		confirmConfig = {
 			title: config.title,
@@ -971,6 +1083,8 @@
 			type: config.type || 'warning',
 			confirmText: config.confirmText || 'Confirm',
 			cancelText: config.cancelText || 'Cancel',
+			inputValue: config.inputValue,
+			inputPlaceholder: config.inputPlaceholder || 'Enter value...',
 			onConfirm: config.onConfirm
 		};
 		showConfirmDialog = true;
@@ -1068,6 +1182,16 @@
 			}
 		} catch (err) {
 			debug.error('git', 'Failed to load remotes:', err);
+		}
+	}
+
+	async function loadNestedRemotes(nested: GitNestedRepoInfo) {
+		if (!projectId) return;
+		try {
+			const list = await ws.http('git:remotes', { projectId, repoPath: nested.path });
+			nestedRemotesList = { ...nestedRemotesList, [nested.relPath]: list };
+		} catch (err) {
+			debug.error('git', 'Failed to load nested remotes:', err);
 		}
 	}
 
@@ -2091,6 +2215,48 @@
 		}
 	}
 
+	function getDefaultRemote(repoPath?: string): string {
+		if (repoPath) {
+			const nested = branchInfo?.nested?.find(n => n.path === repoPath);
+			if (nested) return getNestedSelectedRemote(nested);
+		}
+		return selectedRemote;
+	}
+
+	async function renameBranch(oldName: string, repoPath?: string) {
+		if (!projectId) return;
+		requestConfirm({
+			title: 'Rename Branch',
+			message: `Rename "${oldName}" to:`,
+			confirmText: 'Rename',
+			inputValue: oldName,
+			inputPlaceholder: 'New branch name',
+			onConfirm: async (newName) => {
+				if (!newName || newName === oldName) return;
+				try {
+					await ws.http('git:rename-branch', { projectId, oldName, newName, repoPath });
+					const pushed = repoPath
+						? branchInfo?.nested?.find(n => n.path === repoPath)?.info
+							? pushedBranchNamesFromInfo(branchInfo.nested.find(n => n.path === repoPath)!.info)
+							: new Set<string>()
+						: pushedBranchNames;
+					if (pushed.has(oldName)) {
+						const remote = getDefaultRemote(repoPath);
+						await ws.http('git:push', { projectId, branch: newName, remote, repoPath });
+						await ws.http('git:delete-remote-branch', { projectId, remote, branch: oldName, repoPath });
+						showInfo('Branch Renamed', `"${oldName}" → "${newName}". Remote updated.`);
+					} else {
+						showInfo('Branch Renamed', `"${oldName}" → "${newName}".`);
+					}
+					await loadAll();
+				} catch (err) {
+					debug.error('git', 'Failed to rename branch:', err);
+					showError('Rename Branch Failed', err instanceof Error ? err.message : 'Unknown error');
+				}
+			}
+		});
+	}
+
 	async function deleteBranch(name: string) {
 		requestConfirm({
 			title: 'Delete Branch',
@@ -2164,10 +2330,11 @@
 		mergeRepoPath = null;
 	}
 
-	async function runMergeBranch(name: string, noFastForward = false) {
+	async function runMergeBranch(name: string, noFastForward = false, repoPath?: string) {
 		if (!projectId || !name) return;
-		const isNested = Boolean(mergeRepoPath);
-		const isBusy = getGitOps(projectId, mergeRepoPath ?? undefined).isMoreBusy;
+		const activeRepoPath = repoPath ?? mergeRepoPath ?? undefined;
+		const isNested = Boolean(activeRepoPath);
+		const isBusy = getGitOps(projectId, activeRepoPath).isMoreBusy;
 		if (isBusy) return;
 		if (!isNested && blockedWhileBusy('merge')) return;
 
@@ -2177,7 +2344,7 @@
 					projectId,
 					branchName: name,
 					noFastForward,
-					...(mergeRepoPath && { repoPath: mergeRepoPath })
+					...(activeRepoPath && { repoPath: activeRepoPath })
 				});
 				showMergeBranchModal = false;
 
@@ -2191,16 +2358,19 @@
 					}
 				} else {
 					await loadAll();
+					const targetBranch = repoPath
+						? branchInfo?.nested?.find(n => n.path === repoPath)?.info.current ?? 'current branch'
+						: mergeTargetBranch;
 					showInfo(
 						'Merge Complete',
-						`Merged "${name}" into "${mergeTargetBranch}"${noFastForward ? ' with --no-ff' : ''}.`
+						`Merged "${name}" into "${targetBranch}"${noFastForward ? ' with --no-ff' : ''}.`
 					);
 				}
 			} catch (err) {
 				debug.error('git', 'Failed to merge branch:', err);
 				showError('Merge Failed', err instanceof Error ? err.message : 'Unknown error');
 			}
-		}, mergeRepoPath ?? undefined);
+		}, activeRepoPath);
 	}
 
 	function mergeBranch(name: string) {
@@ -2211,6 +2381,19 @@
 			type: 'info',
 			confirmText: 'Merge',
 			onConfirm: () => void runMergeBranch(name, false)
+		});
+	}
+
+	function mergeNestedBranch(name: string, repoPath: string) {
+		const nested = branchInfo?.nested?.find(n => n.path === repoPath);
+		if (!nested) return;
+		if (blockedWhileBusy('merge')) return;
+		requestConfirm({
+			title: 'Merge Branch',
+			message: `Merge "${name}" into "${nested.info.current}"?`,
+			type: 'info',
+			confirmText: 'Merge',
+			onConfirm: () => void runMergeBranch(name, false, repoPath)
 		});
 	}
 
@@ -3447,6 +3630,10 @@ ${bodies}`;
 	{@const commitState = branchCommitState[branchKey]}
 	{@const branchRelativeDate = formatRelativeTime(branch.lastCommitDate)}
 	{@const nestedPushed = nestedPushedBranchNames(nested)}
+	{@const curPush = !nestedPushed.has(branch.name) || branch.ahead > 0}
+	{@const curPull = branch.behind > 0}
+	{@const curActionCount = (curPush ? 1 : 0) + (curPull ? 1 : 0) + 1}
+	{@const curPadding = curActionCount === 1 ? 'group-hover:pr-9' : curActionCount === 2 ? 'group-hover:pr-16' : 'group-hover:pr-24'}
 	<div>
 		<div
 			class="group relative flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-md transition-colors border cursor-pointer select-none {branch.isCurrent ? 'bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-300' : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300'}"
@@ -3456,7 +3643,7 @@ ${bodies}`;
 			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranchExpanded(branch.name, nested.path); } }}
 		>
 			<Icon name={isExpanded ? 'lucide:chevron-down' : 'lucide:chevron-right'} class="w-3.5 h-3.5 shrink-0 {branch.isCurrent ? 'text-violet-500' : 'text-slate-400'}" />
-			<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 {!branch.isCurrent ? (nestedPushed.has(branch.name) ? 'group-hover:pr-24' : 'group-hover:pr-32') : ''} transition-[padding] duration-150">
+			<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 {!branch.isCurrent ? (nestedPushed.has(branch.name) ? 'group-hover:pr-32' : 'group-hover:pr-40') : curPadding} transition-[padding] duration-150">
 				<div class="flex min-w-0 items-center gap-2">
 					<span class="flex-1 min-w-0 text-sm text-slate-900 dark:text-slate-100 leading-tight truncate" title={branch.name}>{branch.name}</span>
 					{#if upstreamName}<span class="text-3xs text-slate-400 shrink-0">{upstreamName}</span>{/if}
@@ -3478,7 +3665,22 @@ ${bodies}`;
 						<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handlePushBranch(branch.name, nested.path); }} title="Push branch to remote"><Icon name="lucide:upload" class="w-3.5 h-3.5" /></button>
 					{/if}
 				{/if}
-				<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handleDeleteNestedBranch(nested, branch.name); }} title="Delete branch"><Icon name="lucide:trash-2" class="w-3.5 h-3.5" /></button>
+				<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); mergeNestedBranch(branch.name, nested.path); }} title="Merge into current branch"><Icon name="lucide:git-merge" class="w-3.5 h-3.5" /></button>
+			<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handleDeleteNestedBranch(nested, branch.name); }} title="Delete branch"><Icon name="lucide:trash-2" class="w-3.5 h-3.5" /></button>
+			</div>
+			{:else}
+			<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-1 pr-2 bg-white/20 opacity-0 backdrop-blur-md supports-[backdrop-filter]:bg-white/10 transition-opacity group-hover:opacity-100 dark:bg-slate-900/20 dark:supports-[backdrop-filter]:bg-slate-900/10">
+				{#if !nestedPushed.has(branch.name) || branch.ahead > 0}
+					{#if pushingBranch === branch.name}
+						<div class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-emerald-500"><Icon name="lucide:loader-circle" class="w-3.5 h-3.5 animate-spin" /></div>
+					{:else}
+						<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handlePushBranch(branch.name, nested.path); }} title="Push{branch.ahead > 0 ? ` (${branch.ahead} ahead)` : ` ${branch.name} to remote`}"><Icon name="lucide:upload" class="w-3.5 h-3.5" /></button>
+					{/if}
+				{/if}
+				{#if branch.behind > 0}
+					<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handlePull(nested.path, getNestedSelectedRemote(nested)); }} title="Pull ({branch.behind} behind)"><Icon name="lucide:download" class="w-3.5 h-3.5" /></button>
+				{/if}
+				<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-orange-500/10 hover:text-orange-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); renameBranch(branch.name, nested.path); }} title="Rename branch"><Icon name="lucide:pen-line" class="w-3.5 h-3.5" /></button>
 			</div>
 			{/if}
 		</div>
@@ -3627,6 +3829,10 @@ ${bodies}`;
 					onPush={() => handlePush(nested.path, getNestedSelectedRemote(nested))}
 					onPull={() => handlePull(nested.path, getNestedSelectedRemote(nested))}
 					onMoreAction={(action) => handleNestedMoreAction(action, nested.path)}
+					branchDraft={nestedBranchDrafts[nested.relPath] ?? ''}
+					showBranchDraft={nestedShowBranchDrafts[nested.relPath] ?? false}
+					onBranchDraftChange={(val) => nestedBranchDrafts = { ...nestedBranchDrafts, [nested.relPath]: val }}
+					onBranchDraftVisibleChange={(val) => nestedShowBranchDrafts = { ...nestedShowBranchDrafts, [nested.relPath]: val }}
 				/>
 			{/if}
 
@@ -3693,6 +3899,7 @@ ${bodies}`;
 	{@const nestedRemoteQ = nestedRemoteSearchQuery(nested.relPath)}
 	{@const localBranches = filteredNestedLocalBranches(nested)}
 	{@const remoteBranches = filteredNestedRemoteBranches(nested)}
+	{@const nestedRemotes = nestedRemotesList[nested.relPath] ?? []}
 	{@const isCollapsed = nestedReposCollapsed[nested.relPath] !== undefined
 		? nestedReposCollapsed[nested.relPath]
 		: true}
@@ -3795,38 +4002,86 @@ ${bodies}`;
 					</div>
 				{:else}
 					<div class="space-y-0.5">
-						{#if remoteBranches.length === 0}
-							<div class="flex flex-col items-center justify-center gap-2 py-6 text-slate-500 text-xs"><Icon name="lucide:server-off" class="w-5 h-5 opacity-30" /><span>{nestedRemoteQ ? 'No branches match your search' : 'No remote branches'}</span></div>
+						<div class="pb-2">
+							{#if nestedShowAddRemoteForm[nested.relPath]}
+								<div class="p-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
+									<input type="text" value={nestedNewRemoteNames[nested.relPath] ?? ''} oninput={(e) => nestedNewRemoteNames = { ...nestedNewRemoteNames, [nested.relPath]: e.currentTarget.value }} placeholder="Remote name (e.g. origin)..." class="w-full px-2.5 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20" disabled={nestedAddingRemote[nested.relPath]} />
+									<input type="text" value={nestedNewRemoteUrls[nested.relPath] ?? ''} oninput={(e) => nestedNewRemoteUrls = { ...nestedNewRemoteUrls, [nested.relPath]: e.currentTarget.value }} placeholder="Repository URL..." class="w-full px-2.5 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20" onkeydown={(e) => e.key === 'Enter' && handleNestedAddRemote(nested.relPath)} disabled={nestedAddingRemote[nested.relPath]} />
+									<div class="flex gap-1.5">
+										<button type="button" class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer border-none {(nestedNewRemoteNames[nested.relPath] ?? '').trim() && (nestedNewRemoteUrls[nested.relPath] ?? '').trim() && !nestedAddingRemote[nested.relPath] ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}" onclick={() => handleNestedAddRemote(nested.relPath)} disabled={nestedAddingRemote[nested.relPath] || !(nestedNewRemoteNames[nested.relPath] ?? '').trim() || !(nestedNewRemoteUrls[nested.relPath] ?? '').trim()}>Add Remote</button>
+										<button type="button" class="px-3 py-1.5 text-xs font-medium bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer" onclick={() => { nestedShowAddRemoteForm = { ...nestedShowAddRemoteForm, [nested.relPath]: false }; nestedNewRemoteNames = { ...nestedNewRemoteNames, [nested.relPath]: '' }; nestedNewRemoteUrls = { ...nestedNewRemoteUrls, [nested.relPath]: '' }; }}>Cancel</button>
+									</div>
+								</div>
+							{:else}
+								<button type="button" class="flex items-center justify-center gap-2 w-full py-2 px-3 border border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-xs text-slate-500 hover:text-violet-600 hover:border-violet-400 transition-colors cursor-pointer bg-transparent" onclick={() => nestedShowAddRemoteForm = { ...nestedShowAddRemoteForm, [nested.relPath]: true }}><Icon name="lucide:plus" class="w-3.5 h-3.5" /><span>Add Remote</span></button>
+							{/if}
+						</div>
+						{#if nestedRemotes.length === 0}
+							<div class="flex flex-col items-center justify-center gap-2 py-6 text-slate-500 text-xs"><Icon name="lucide:server-off" class="w-5 h-5 opacity-30" /><span>No remote connections</span></div>
 						{:else}
-							{#each nestedRemoteNames(nested) as remoteName}
+							{#each nestedRemotes as remote (remote.name)}
+								{@const remoteName = remote.name}
 								{@const rbList = remoteBranches.filter(b => b.name.startsWith(remoteName + '/'))}
+								{@const isActiveRemote = remoteName === getNestedActiveRemote(nested.relPath)}
+								{@const isFetching = nestedFetchingRemote[nested.relPath] === remoteName}
+								{@const isEditing = nestedEditingRemote[nested.relPath] === remoteName}
 								<div>
-									<div class="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-md border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60">
-										<Icon name="lucide:server" class="w-4 h-4 shrink-0 text-slate-400" />
-										<span class="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{remoteName}</span>
-									</div>
-									<div class="ml-5 mt-0.5 mb-1 border-l border-slate-200 dark:border-slate-700 pl-2 space-y-0.5">
-										{#each rbList as branch (branch.name)}
-											{@const branchRelativeDate = formatRelativeTime(branch.lastCommitDate)}
-											{@const shortName = branch.name.substring(remoteName.length + 1)}
-											{@const isDeleting = deletingRemoteBranch === nestedRemoteBranchKey(remoteName, shortName, nested.path)}
-											<div class="group/rb relative flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors">
-												<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 group-hover/rb:pr-20 transition-[padding] duration-150">
-													<span class="text-sm text-slate-700 dark:text-slate-300 whitespace-nowrap leading-tight truncate" title={branch.name}>{shortName}</span>
-													{#if branchRelativeDate}<span class="text-xs text-slate-500 leading-tight">{branchRelativeDate}</span>{/if}
-												</div>
-												{#if isDeleting}
-													<div class="flex items-center justify-center w-7 h-7 text-slate-400 shrink-0"><Icon name="lucide:loader-circle" class="w-3.5 h-3.5 animate-spin" /></div>
-												{:else}
-													<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-1 pr-2 bg-white/20 opacity-0 backdrop-blur-md supports-[backdrop-filter]:bg-white/10 transition-opacity group-hover/rb:opacity-100 dark:bg-slate-900/20 dark:supports-[backdrop-filter]:bg-slate-900/10">
-														<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-violet-500/10 hover:text-violet-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); checkoutRemoteBranch(branch.name, nested.path); }} title="Checkout locally"><Icon name="lucide:arrow-right" class="w-3.5 h-3.5" /></button>
-														<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); copyToClipboard(branch.name); }} title="Copy branch name"><Icon name="lucide:copy" class="w-3.5 h-3.5" /></button>
-														<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handleDeleteRemoteBranch(remoteName, shortName, nested.path); }} title="Delete branch"><Icon name="lucide:trash-2" class="w-3.5 h-3.5" /></button>
-													</div>
-												{/if}
+									{#if isEditing}
+										<div class="p-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
+											<input type="text" value={nestedEditRemoteNames[nested.relPath] ?? ''} oninput={(e) => nestedEditRemoteNames = { ...nestedEditRemoteNames, [nested.relPath]: e.currentTarget.value }} placeholder="Remote name..." class="w-full px-2.5 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20" disabled={nestedSavingRemote[nested.relPath]} />
+											<input type="text" value={nestedEditRemoteUrls[nested.relPath] ?? ''} oninput={(e) => nestedEditRemoteUrls = { ...nestedEditRemoteUrls, [nested.relPath]: e.currentTarget.value }} placeholder="Repository URL..." class="w-full px-2.5 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20" onkeydown={(e) => e.key === 'Enter' && handleNestedSaveRemote(nested.relPath)} disabled={nestedSavingRemote[nested.relPath]} />
+											<div class="flex gap-1.5">
+												<button type="button" class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer border-none {(nestedEditRemoteNames[nested.relPath] ?? '').trim() && (nestedEditRemoteUrls[nested.relPath] ?? '').trim() && !nestedSavingRemote[nested.relPath] ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}" onclick={() => handleNestedSaveRemote(nested.relPath)} disabled={nestedSavingRemote[nested.relPath] || !(nestedEditRemoteNames[nested.relPath] ?? '').trim() || !(nestedEditRemoteUrls[nested.relPath] ?? '').trim()}>Save</button>
+												<button type="button" class="px-3 py-1.5 text-xs font-medium bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer" onclick={() => { nestedEditingRemote = { ...nestedEditingRemote, [nested.relPath]: null }; nestedEditRemoteNames = { ...nestedEditRemoteNames, [nested.relPath]: '' }; nestedEditRemoteUrls = { ...nestedEditRemoteUrls, [nested.relPath]: '' }; }}>Cancel</button>
 											</div>
-										{/each}
-									</div>
+										</div>
+									{:else}
+										<div class="group relative flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-md border transition-colors select-none {isActiveRemote ? 'bg-violet-500/10 border-violet-500/20' : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60'}">
+											<Icon name="lucide:server" class="w-4 h-4 shrink-0 text-slate-400" />
+											<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 {isActiveRemote ? 'group-hover:pr-24' : 'group-hover:pr-32'} transition-[padding] duration-150">
+												<div class="flex min-w-0 items-center gap-2">
+													<span class="min-w-0 text-sm font-medium text-slate-900 dark:text-slate-100 leading-tight truncate">{remoteName}</span>
+													{#if isActiveRemote}<span class="shrink-0 text-3xs font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-600 dark:text-violet-400">Active</span>{/if}
+												</div>
+											</div>
+											{#if isFetching}
+												<div class="flex items-center justify-center w-7 h-7 text-slate-500 shrink-0"><Icon name="lucide:loader-circle" class="w-3.5 h-3.5 animate-spin" /></div>
+											{:else}
+												<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-1 pr-2 bg-white/20 opacity-0 backdrop-blur-md supports-[backdrop-filter]:bg-white/10 transition-opacity group-hover:opacity-100 dark:bg-slate-900/20 dark:supports-[backdrop-filter]:bg-slate-900/10">
+													{#if !isActiveRemote}
+														<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-violet-500/10 hover:text-violet-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); setNestedActiveRemote(remoteName, nested.relPath); }} title="Set as active remote"><Icon name="lucide:star" class="w-3.5 h-3.5" /></button>
+													{/if}
+													<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-violet-500/10 hover:text-violet-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); nestedEditingRemote = { ...nestedEditingRemote, [nested.relPath]: remoteName }; nestedEditRemoteNames = { ...nestedEditRemoteNames, [nested.relPath]: remoteName }; }} title="Edit remote"><Icon name="lucide:pencil" class="w-3.5 h-3.5" /></button>
+													<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); void handleNestedFetchRemote(remoteName, nested.relPath); }} title="Fetch"><Icon name="lucide:refresh-cw" class="w-3.5 h-3.5" /></button>
+													<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handleNestedRemoveRemote(remoteName, nested.relPath); }} title="Disconnect"><Icon name="lucide:unlink" class="w-3.5 h-3.5" /></button>
+												</div>
+											{/if}
+										</div>
+									{/if}
+									{#if rbList.length > 0}
+										<div class="ml-5 mt-0.5 mb-1 border-l border-slate-200 dark:border-slate-700 pl-2 space-y-0.5">
+											{#each rbList as branch (branch.name)}
+												{@const branchRelativeDate = formatRelativeTime(branch.lastCommitDate)}
+												{@const shortName = branch.name.substring(remoteName.length + 1)}
+												{@const isDeleting = deletingRemoteBranch === nestedRemoteBranchKey(remoteName, shortName, nested.path)}
+												<div class="group/rb relative flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors">
+													<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 group-hover/rb:pr-20 transition-[padding] duration-150">
+														<span class="text-sm text-slate-700 dark:text-slate-300 whitespace-nowrap leading-tight truncate" title={branch.name}>{shortName}</span>
+														{#if branchRelativeDate}<span class="text-xs text-slate-500 leading-tight">{branchRelativeDate}</span>{/if}
+													</div>
+													{#if isDeleting}
+														<div class="flex items-center justify-center w-7 h-7 text-slate-400 shrink-0"><Icon name="lucide:loader-circle" class="w-3.5 h-3.5 animate-spin" /></div>
+													{:else}
+														<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-1 pr-2 bg-white/20 opacity-0 backdrop-blur-md supports-[backdrop-filter]:bg-white/10 transition-opacity group-hover/rb:opacity-100 dark:bg-slate-900/20 dark:supports-[backdrop-filter]:bg-slate-900/10">
+															<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-violet-500/10 hover:text-violet-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); checkoutRemoteBranch(branch.name, nested.path); }} title="Checkout locally"><Icon name="lucide:arrow-right" class="w-3.5 h-3.5" /></button>
+															<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); copyToClipboard(branch.name); }} title="Copy branch name"><Icon name="lucide:copy" class="w-3.5 h-3.5" /></button>
+															<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handleDeleteRemoteBranch(remoteName, shortName, nested.path); }} title="Delete branch"><Icon name="lucide:trash-2" class="w-3.5 h-3.5" /></button>
+														</div>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									{/if}
 								</div>
 							{/each}
 						{/if}
@@ -4616,6 +4871,10 @@ ${bodies}`;
 									{@const isExpanded = expandedBranches.has(branch.name)}
 									{@const commitState = branchCommitState[branch.name]}
 									{@const branchRelativeDate = formatRelativeTime(branch.lastCommitDate)}
+									{@const curPush = !pushedBranchNames.has(branch.name) || branch.ahead > 0}
+									{@const curPull = branch.behind > 0}
+									{@const curActionCount = (curPush ? 1 : 0) + (curPull ? 1 : 0) + 1}
+									{@const curPadding = curActionCount === 1 ? 'group-hover:pr-9' : curActionCount === 2 ? 'group-hover:pr-16' : 'group-hover:pr-24'}
 									<div>
 										<div
 											class="group relative flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-md transition-colors border cursor-pointer select-none {branch.isCurrent ? 'bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-300' : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300'}"
@@ -4625,7 +4884,7 @@ ${bodies}`;
 											onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranchExpanded(branch.name); } }}
 										>
 											<Icon name={isExpanded ? 'lucide:chevron-down' : 'lucide:chevron-right'} class="w-3.5 h-3.5 shrink-0 {branch.isCurrent ? 'text-violet-500' : 'text-slate-400'}" />
-											<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 {!branch.isCurrent ? (pushedBranchNames.has(branch.name) ? 'group-hover:pr-24' : 'group-hover:pr-32') : ''} transition-[padding] duration-150">
+											<div class="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-2 {!branch.isCurrent ? (pushedBranchNames.has(branch.name) ? 'group-hover:pr-24' : 'group-hover:pr-32') : curPadding} transition-[padding] duration-150">
 												<div class="flex min-w-0 items-center gap-2">
 													<span class="flex-1 min-w-0 text-sm text-slate-900 dark:text-slate-100 leading-tight truncate" title={branch.name}>{branch.name}</span>
 													{#if upstreamName}<span class="text-3xs text-slate-400 shrink-0">{upstreamName}</span>{/if}
@@ -4649,6 +4908,20 @@ ${bodies}`;
 												{/if}
 												<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); mergeBranch(branch.name); }} title="Merge into current branch"><Icon name="lucide:git-merge" class="w-3.5 h-3.5" /></button>
 												<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); deleteBranch(branch.name); }} title="Delete branch"><Icon name="lucide:trash-2" class="w-3.5 h-3.5" /></button>
+										</div>
+										{:else}
+										<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-1 pr-2 bg-white/20 opacity-0 backdrop-blur-md supports-[backdrop-filter]:bg-white/10 transition-opacity group-hover:opacity-100 dark:bg-slate-900/20 dark:supports-[backdrop-filter]:bg-slate-900/10">
+											{#if !pushedBranchNames.has(branch.name) || branch.ahead > 0}
+												{#if pushingBranch === branch.name}
+													<div class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-emerald-500"><Icon name="lucide:loader-circle" class="w-3.5 h-3.5 animate-spin" /></div>
+												{:else}
+													<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handlePushBranch(branch.name); }} title="Push{branch.ahead > 0 ? ` (${branch.ahead} ahead)` : ` ${branch.name} to remote`}"><Icon name="lucide:upload" class="w-3.5 h-3.5" /></button>
+												{/if}
+											{/if}
+											{#if branch.behind > 0}
+												<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-blue-500/10 hover:text-blue-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); handlePull(); }} title="Pull ({branch.behind} behind)"><Icon name="lucide:download" class="w-3.5 h-3.5" /></button>
+											{/if}
+											<button type="button" class="pointer-events-auto flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:bg-orange-500/10 hover:text-orange-500 transition-colors bg-transparent border-none cursor-pointer" onclick={(e) => { e.stopPropagation(); renameBranch(branch.name); }} title="Rename branch"><Icon name="lucide:pen-line" class="w-3.5 h-3.5" /></button>
 										</div>
 										{/if}
 										</div>
@@ -5427,6 +5700,8 @@ ${bodies}`;
 		message={confirmConfig.message}
 		confirmText={confirmConfig.confirmText}
 		cancelText={confirmConfig.cancelText}
+		inputValue={confirmConfig.inputValue}
+		inputPlaceholder={confirmConfig.inputPlaceholder}
 		onConfirm={confirmConfig.onConfirm}
 	/>
 </div>

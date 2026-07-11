@@ -48,6 +48,9 @@
 	// Touchscreen detection
 	let isTouchDevice = $state(false);
 
+	// Track current branch name reactively
+	const currentBranch = $derived(gitPanelRef?.panelActions?.getBranchInfo()?.current || '...');
+
 	// Chat session users (other users in the same chat session, excluding self)
 	const chatSessionUsers = $derived.by(() => {
 		if (panelId !== 'chat') return [];
@@ -530,7 +533,6 @@
 
 				<!-- Branch shortcut → Branches tab (Local) -->
 				{#if gitPanelRef?.panelActions?.getIsRepo()}
-					{@const branchInfo = gitPanelRef?.panelActions?.getBranchInfo()}
 					<button
 						type="button"
 						class="flex items-center gap-1 {isMobile ? 'h-9 px-2' : 'h-6 px-1.5'} bg-slate-100 dark:bg-slate-800/60 border-none rounded-md text-slate-700 dark:text-slate-300 cursor-pointer transition-all duration-150 hover:bg-violet-500/10 hover:text-violet-600 dark:hover:text-violet-400"
@@ -538,7 +540,7 @@
 						title="Manage branches"
 					>
 						<Icon name="lucide:git-branch" class={isMobile ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
-						<span class="text-xs font-medium truncate max-w-24">{branchInfo?.current || '...'}</span>
+						<span class="text-xs font-medium truncate max-w-24">{currentBranch}</span>
 					</button>
 				{/if}
 

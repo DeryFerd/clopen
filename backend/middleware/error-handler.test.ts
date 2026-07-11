@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { Elysia, t } from 'elysia';
 
 /**
  * Tests for the redacted error summary returned to the client.
@@ -14,7 +15,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type Module = {
 	devErrorSummary: (error: unknown) => string;
-	errorHandlerMiddleware: unknown;
+	errorHandlerMiddleware: (app: Elysia) => any;
 };
 
 async function loadWithNodeEnv(env: 'development' | 'production'): Promise<Module> {
@@ -129,5 +130,47 @@ describe('devErrorSummary', () => {
 		// would fail.
 		const { errorHandlerMiddleware } = await loadWithNodeEnv('production');
 		expect(typeof errorHandlerMiddleware).toBe('function');
+	});
+});
+
+describe('VALIDATION responses', () => {
+	/**
+	 * Elysia's ValidationError.message is a JSON string that embeds the
+	 * full submitted request body (`found: <value>`) — even in production.
+	 * A field that fails validation (e.g. wrong type) can sit right next
+	 * to a field that didn't (e.g. a password), and both get echoed back.
+	 * These tests hit the middleware through a real request so they catch
+	 * a regression even if a future change reaches for `error.message`
+	 * again.
+	 */
+	async function appWithValidation(env: 'development' | 'production') {
+		const { errorHandlerMiddleware } = await loadWithNodeEnv(env);
+		return new Elysia()
+			.use(errorHandlerMiddleware)
+			.post('/login', ({ body }) => body, {
+				body: t.Object({ username: t.String(), password: t.String(), age: t.Number() })
+			});
+	}
+
+	async function postInvalid(app: Elysia) {
+		return app.handle(new Request('http://localhost/login', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username: 'alice', password: 'SuperSecret123!', age: 'not-a-number' })
+		}));
+	}
+
+	test('does not echo the submitted request body in development', async () => {
+		const res = await postInvalid(await appWithValidation('development'));
+		const body = await res.text();
+		expect(body).not.toContain('SuperSecret123!');
+		expect(body).not.toContain('alice');
+	});
+
+	test('does not echo the submitted request body in production', async () => {
+		const res = await postInvalid(await appWithValidation('production'));
+		const body = await res.text();
+		expect(body).not.toContain('SuperSecret123!');
+		expect(body).not.toContain('alice');
 	});
 });

@@ -99,12 +99,20 @@ export function errorHandlerMiddleware(app: Elysia) {
 		// Handle different error types
 		switch (code) {
 			case 'VALIDATION':
+				// Elysia's ValidationError.message is a JSON string that always
+				// embeds the full submitted value (`found: <value>`) — even in
+				// production. Field names are arbitrary, so no redaction regex
+				// can reliably tell a password field from a harmless one; never
+				// forward the raw message to the client. Full detail (including
+				// the submitted value) is still logged server-side below.
 				console.error('[Error]', code, reqInfo, error.message);
 				set.status = 400;
 				return {
 					success: false,
 					error: 'Validation error',
-					message: error.message
+					message: SERVER_ENV.NODE_ENV === 'production'
+						? PROD_RESPONSE_MESSAGE
+						: 'Request failed validation — see server log for details'
 				};
 
 			case 'NOT_FOUND':
